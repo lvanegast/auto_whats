@@ -1,0 +1,47 @@
+services:
+  # ============================================================================
+  # 1. GATEWAY DE WHATSAPP (OPENWA)
+  # ============================================================================
+  openwa-gateway:
+    image: ghcr.io/rmyndharis/openwa:latest
+    container_name: openwa-gateway
+    restart: unless-stopped
+    ports:
+      - "2785:2785" # Puerto de la API HTTP de OpenWA
+    environment:
+      - API_MASTER_KEY=dev-admin-key
+    volumes:
+      # Persiste las sesiones, el código QR y la API key generada en tu máquina local
+      - ./openwa_data:/app/data
+    networks:
+      - whatsapp_net
+
+  # ============================================================================
+  # 2. NUESTRO BACKEND PYTHON (FASTAPI + LANGCHAIN)
+  # ============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auto-whats-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000" # Exponer puerto de FastAPI al host
+    environment:
+      - PORT=8000
+      - OPENWA_API_URL=http://openwa-gateway:2785 # Conexión interna Docker
+      # NOTA: Reemplaza esta clave con la generada por tu gateway de OpenWA 
+      # (la encuentras en http://localhost:2886 tras iniciar por primera vez)
+      - OPENWA_API_KEY=dev-admin-key
+      - OPENWA_SESSION_ID=default
+    depends_on:
+      - openwa-gateway
+    networks:
+      - whatsapp_net
+
+# ------------------------------------------------------------------------------
+# RED INTERNA COMPARTIDA
+# ------------------------------------------------------------------------------
+networks:
+  whatsapp_net:
+    driver: bridge

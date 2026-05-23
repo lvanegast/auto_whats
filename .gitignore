@@ -1,0 +1,30 @@
+# ==============================================================================
+# GITIGNORE PARA PROYECTO DE AUTOMATIZACIÓN DE WHATSAPP (FASTAPI + OPENWA)
+# ==============================================================================
+
+# Cachés y compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Entornos virtuales locales
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# Archivos de configuración y secretos (¡MUY IMPORTANTE!)
+.env
+
+# Datos persistentes de la sesión de WhatsApp (¡CRÍTICO!)
+# Contiene bases de datos locales sqlite, credenciales y caché del navegador Chrome
+openwa_data/
+
+# Archivos temporales generados por pruebas
+codigo_qr.png
+qr_code.png
+*.log
