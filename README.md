@@ -91,5 +91,5 @@ Esto generará un archivo `codigo_qr.png` en la raíz del proyecto. Escanéalo d
 * **Causa 1**: El backend de FastAPI está apagado. Inícialo con `uv run auto-whats`.
 * **Causa 2**: El webhook del gateway apunta a un puerto o evento incorrecto. Ejecuta el script de registro para asegurar la suscripción correcta a `"message.received"`:
   ```bash
-  uv run python scratch/register_correct_webhook.py
+  uv run python scripts/register_webhook.py
   ```
