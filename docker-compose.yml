@@ -30,12 +30,31 @@ services:
     environment:
       - PORT=8000
       - OPENWA_API_URL=http://openwa-gateway:2785 # Conexión interna Docker
-      # NOTA: Reemplaza esta clave con la generada por tu gateway de OpenWA 
-      # (la encuentras en http://localhost:2886 tras iniciar por primera vez)
       - OPENWA_API_KEY=dev-admin-key
       - OPENWA_SESSION_ID=default
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres-secret-pwd@postgres-db:5432/auto_whats_db
+      - GOOGLE_API_KEY=your-api-key-here
     depends_on:
       - openwa-gateway
+      - postgres-db
+    networks:
+      - whatsapp_net
+
+  # ============================================================================
+  # 3. BASE DE DATOS POSTGRESQL (PERSISTENCIA PROFESIONAL)
+  # ============================================================================
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: whatsapp-postgres-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres-secret-pwd
+      - POSTGRES_DB=auto_whats_db
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
     networks:
       - whatsapp_net
 

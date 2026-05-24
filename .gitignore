@@ -23,6 +23,7 @@ env/
 # Datos persistentes de la sesión de WhatsApp (¡CRÍTICO!)
 # Contiene bases de datos locales sqlite, credenciales y caché del navegador Chrome
 openwa_data/
+postgres_data/
 
 # Archivos temporales generados por pruebas
 codigo_qr.png

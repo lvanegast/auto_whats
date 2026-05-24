@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.client import OpenWAClient
+from src.database import Base, engine, SessionLocal
+from src.models import UserSession, MessageHistory
+from src.agent import get_ai_response
+from sqlalchemy.future import select
 
 # Configuración básica de Logging profesional
 logging.basicConfig(
@@ -40,8 +44,19 @@ app = FastAPI(
 async def startup_event():
     """
     Se ejecuta al arrancar el servidor FastAPI.
-    Resuelve el ID de sesión dinámico (UUID) buscando por el nombre amigable 'default'.
+    Resuelve el ID de sesión dinámico (UUID) buscando por el nombre amigable 'default'
+    e inicializa automáticamente las tablas de base de datos en Postgres.
     """
+    # 1. Crear tablas en Postgres de forma automática si no existen
+    logger.info("Verificando y creando tablas de base de datos asíncronas en PostgreSQL...")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("✅ Tablas de base de datos creadas/verificadas con éxito.")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar tablas en PostgreSQL: {e}")
+
+    # 2. Resolver ID de sesión de OpenWA
     logger.info("Resolviendo ID de sesión de OpenWA...")
     list_url = f"{openwa_client.base_url}/api/sessions"
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -168,7 +183,8 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
     """
     Función de fondo para procesar el mensaje sin bloquear la respuesta HTTP al webhook.
     Soporta navegación interactiva por estados tanto para texto tradicional como para
-    eventos estructurados de botones/listas.
+    eventos estructurados de botones/listas, persistidos en base de datos PostgreSQL,
+    con soporte conversacional de Inteligencia Artificial (Gemini).
     """
     try:
         # Extraer campos comunes de OpenWA
@@ -187,6 +203,7 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
 
         # Limpiar y normalizar el cuerpo de entrada
         text_input = (body or "").strip().lower()
+        raw_input = body or selected_button or list_choice or ""
         
         # Registrar logs detallados de la interacción
         if selected_button:
@@ -196,114 +213,137 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
         else:
             logger.info(f"Mensaje de '{sender_name}' ({chat_id}): '{text_input}'")
 
-        # Comandos básicos inmediatos
-        if text_input in ["!ping", "ping"]:
-            logger.info("Comando !ping detectado. Respondiendo...")
-            await openwa_client.send_text_message(
-                chat_id=chat_id,
-                text=f"¡Hola {sender_name}! ¡Pong! 🏓 El backend en Python con FastAPI está en línea y funcionando perfectamente."
-            )
-            return
-
-        # Comandos para desplegar o reiniciar el menú principal
-        if text_input in ["!ayuda", "ayuda", "!menu", "menu", "hola", "hi", "inicio", "empezar"]:
-            logger.info(f"Comando de inicio/ayuda detectado. Enviando menú principal a {chat_id}...")
-            USER_STATES[chat_id] = "main_menu"
-            await openwa_client.send_text_message(
-                chat_id=chat_id,
-                text=MENU_PRINCIPAL.format(sender_name=sender_name)
-            )
-            return
-
-        # Obtener el estado actual del flujo del usuario (por defecto 'idle')
-        current_state = USER_STATES.get(chat_id, "idle")
-
         # ----------------------------------------------------------------------
-        # ENRUTADOR E INTEGRADOR DE INTERACCIONES HÍBRIDAS
+        # PERSISTENCIA DE ESTADOS EN BASE DE DATOS POSTGRESQL (ASÍNCRONO)
         # ----------------------------------------------------------------------
-        
-        # Atajo global para volver al menú principal en cualquier momento
-        if text_input == "0" or selected_button == "btn_menu_principal" or list_choice == "row_menu_principal":
-            USER_STATES[chat_id] = "main_menu"
-            await openwa_client.send_text_message(
-                chat_id=chat_id,
-                text=MENU_PRINCIPAL.format(sender_name=sender_name)
+        async with SessionLocal() as db:
+            # 1. Buscar o crear la sesión de usuario
+            session_query = select(UserSession).where(UserSession.chat_id == chat_id)
+            session_result = await db.execute(session_query)
+            db_session = session_result.scalar_one_or_none()
+            
+            if not db_session:
+                logger.info(f"🆕 Creando nueva sesión asíncrona para el usuario {chat_id} en PostgreSQL...")
+                db_session = UserSession(chat_id=chat_id, current_state="idle")
+                db.add(db_session)
+                await db.commit()
+                await db.refresh(db_session)
+            
+            # 2. Registrar el mensaje entrante del usuario en el historial
+            user_msg = MessageHistory(chat_id=chat_id, role="user", body=str(raw_input))
+            db.add(user_msg)
+            await db.commit()
+            
+            # 3. Cargar el historial reciente de mensajes (últimos 10) para el contexto de la IA
+            history_query = (
+                select(MessageHistory)
+                .where(MessageHistory.chat_id == chat_id)
+                .order_by(MessageHistory.timestamp.asc())
             )
-            return
+            history_result = await db.execute(history_query)
+            db_history = history_result.scalars().all()
+            
+            # Extraer estado actual
+            current_state = db_session.current_state
 
-        # 1. Flujo desde Menú Principal
-        if current_state == "main_menu":
-            if text_input == "1" or selected_button == "btn_catalogo" or list_choice == "row_catalogo" or "catálogo" in text_input:
-                USER_STATES[chat_id] = "catalog"
-                await openwa_client.send_text_message(chat_id=chat_id, text=MENU_CATALOGO)
-            elif text_input == "2" or selected_button == "btn_soporte" or list_choice == "row_soporte" or "soporte" in text_input:
-                USER_STATES[chat_id] = "support"
-                await openwa_client.send_text_message(chat_id=chat_id, text=MENU_SOPORTE)
-            elif text_input == "3" or selected_button == "btn_faq" or list_choice == "row_faq" or "preguntas" in text_input:
-                USER_STATES[chat_id] = "faq"
-                await openwa_client.send_text_message(chat_id=chat_id, text=MENU_FAQ)
-            else:
-                # Opción no reconocida en el menú principal
-                await openwa_client.send_text_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ Opción no reconocida.\n\n" + MENU_PRINCIPAL.format(sender_name=sender_name)
+            # Helper para registrar respuesta enviada por el bot y guardarla en DB
+            async def responder_y_guardar(text_response: str, new_state: str = None):
+                # Guardar en base de datos la respuesta de la app/asistente
+                bot_msg = MessageHistory(chat_id=chat_id, role="assistant", body=text_response)
+                db.add(bot_msg)
+                
+                # Actualizar el estado si es necesario
+                if new_state:
+                    db_session.current_state = new_state
+                
+                await db.commit()
+                
+                # Enviar físicamente por WhatsApp a través del cliente OpenWA
+                await openwa_client.send_text_message(chat_id=chat_id, text=text_response)
+
+            # Comandos básicos inmediatos
+            if text_input in ["!ping", "ping"]:
+                logger.info("Comando !ping detectado. Respondiendo...")
+                await responder_y_guardar(
+                    f"¡Hola {sender_name}! ¡Pong! 🏓 El backend asíncrono con PostgreSQL está en línea y funcionando perfectamente."
                 )
-            return
+                return
 
-        # 2. Flujo desde Catálogo
-        elif current_state == "catalog":
-            if text_input == "11" or list_choice == "row_tec" or "tecnología" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_TEC)
-            elif text_input == "12" or list_choice == "row_cel" or "celulares" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_CEL)
-            elif text_input == "13" or list_choice == "row_aud" or "audio" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_AUD)
-            elif text_input == "1":
-                await openwa_client.send_text_message(chat_id=chat_id, text=MENU_CATALOGO)
-            else:
-                await openwa_client.send_text_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ Opción de catálogo no reconocida.\n\n" + MENU_CATALOGO
-                )
-            return
+            # Comandos para desplegar o reiniciar el menú principal
+            if text_input in ["!ayuda", "ayuda", "!menu", "menu", "hola", "hi", "inicio", "empezar"]:
+                logger.info(f"Comando de inicio/ayuda detectado. Enviando menú principal a {chat_id}...")
+                await responder_y_guardar(MENU_PRINCIPAL.format(sender_name=sender_name), new_state="main_menu")
+                return
 
-        # 3. Flujo desde Soporte
-        elif current_state == "support":
-            if text_input == "21" or list_choice == "row_agente" or "agente" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_AGENTE)
-            elif text_input == "22" or list_choice == "row_correo" or "correo" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_CORREO)
-            else:
-                await openwa_client.send_text_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ Opción de soporte no reconocida.\n\n" + MENU_SOPORTE
-                )
-            return
+            # Atajo global para volver al menú principal en cualquier momento
+            if text_input == "0" or selected_button == "btn_menu_principal" or list_choice == "row_menu_principal":
+                logger.info("Atajo global recibido. Volviendo al menú principal...")
+                await responder_y_guardar(MENU_PRINCIPAL.format(sender_name=sender_name), new_state="main_menu")
+                return
 
-        # 4. Flujo desde FAQ
-        elif current_state == "faq":
-            if text_input == "31" or list_choice == "row_envio" or "envío" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_ENVIO)
-            elif text_input == "32" or list_choice == "row_pago" or "pago" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_PAGO)
-            elif text_input == "33" or list_choice == "row_devolucion" or "devolución" in text_input:
-                await openwa_client.send_text_message(chat_id=chat_id, text=RESPUESTA_DEVOLUCION)
-            elif text_input == "3":
-                await openwa_client.send_text_message(chat_id=chat_id, text=MENU_FAQ)
-            else:
-                await openwa_client.send_text_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ Opción de FAQ no reconocida.\n\n" + MENU_FAQ
-                )
-            return
+            # ----------------------------------------------------------------------
+            # ENRUTADOR E INTEGRADOR DE INTERACCIONES HÍBRIDAS (ESTÁTICO / DINÁMICO)
+            # ----------------------------------------------------------------------
+            
+            # 1. Flujo desde Menú Principal
+            if current_state == "main_menu":
+                if text_input == "1" or selected_button == "btn_catalogo" or list_choice == "row_catalogo" or "catálogo" in text_input:
+                    await responder_y_guardar(MENU_CATALOGO, new_state="catalog")
+                    return
+                elif text_input == "2" or selected_button == "btn_soporte" or list_choice == "row_soporte" or "soporte" in text_input:
+                    await responder_y_guardar(MENU_SOPORTE, new_state="support")
+                    return
+                elif text_input == "3" or selected_button == "btn_faq" or list_choice == "row_faq" or "preguntas" in text_input:
+                    await responder_y_guardar(MENU_FAQ, new_state="faq")
+                    return
 
-        # 5. Respuesta fallback (fuera de menús activos)
-        else:
-            USER_STATES[chat_id] = "main_menu"
-            await openwa_client.send_text_message(
-                chat_id=chat_id,
-                text=f"🤖 Hola *{sender_name}*, no reconozco ese mensaje.\n\n" + MENU_PRINCIPAL.format(sender_name=sender_name)
-            )
+            # 2. Flujo desde Catálogo
+            elif current_state == "catalog":
+                if text_input == "11" or list_choice == "row_tec" or "tecnología" in text_input:
+                    await responder_y_guardar(RESPUESTA_TEC)
+                    return
+                elif text_input == "12" or list_choice == "row_cel" or "celulares" in text_input:
+                    await responder_y_guardar(RESPUESTA_CEL)
+                    return
+                elif text_input == "13" or list_choice == "row_aud" or "audio" in text_input:
+                    await responder_y_guardar(RESPUESTA_AUD)
+                    return
+                elif text_input == "1":
+                    await responder_y_guardar(MENU_CATALOGO)
+                    return
+
+            # 3. Flujo desde Soporte
+            elif current_state == "support":
+                if text_input == "21" or list_choice == "row_agente" or "agente" in text_input:
+                    await responder_y_guardar(RESPUESTA_AGENTE)
+                    return
+                elif text_input == "22" or list_choice == "row_correo" or "correo" in text_input:
+                    await responder_y_guardar(RESPUESTA_CORREO)
+                    return
+
+            # 4. Flujo desde FAQ
+            elif current_state == "faq":
+                if text_input == "31" or list_choice == "row_envio" or "envío" in text_input:
+                    await responder_y_guardar(RESPUESTA_ENVIO)
+                    return
+                elif text_input == "32" or list_choice == "row_pago" or "pago" in text_input:
+                    await responder_y_guardar(RESPUESTA_PAGO)
+                    return
+                elif text_input == "33" or list_choice == "row_devolucion" or "devolución" in text_input:
+                    await responder_y_guardar(RESPUESTA_DEVOLUCION)
+                    return
+                elif text_input == "3":
+                    await responder_y_guardar(MENU_FAQ)
+                    return
+
+            # ----------------------------------------------------------------------
+            # FALLBACK DE LENGUAJE NATURAL: INVOCAR INTELIGENCIA ARTIFICIAL (GEMINI)
+            # ----------------------------------------------------------------------
+            logger.info(f"Interacción libre en lenguaje natural detectada para {chat_id}. Invocando Gemini...")
+            ai_reply = await get_ai_response(user_message=str(body or ""), db_history=db_history)
+            
+            # Responder al cliente con la respuesta de la IA
+            await responder_y_guardar(ai_reply)
 
     except Exception as e:
         logger.error(f"Error procesando el mensaje asíncronamente: {e}", exc_info=True)
