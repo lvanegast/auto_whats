@@ -35,6 +35,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres-secret-pwd@postgres-db:5432/auto_whats_db
       - REDIS_URL=redis://redis:6379/0
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ADMIN_PHONE_NUMBER=${ADMIN_PHONE_NUMBER}
     depends_on:
       - openwa-gateway
       - postgres-db

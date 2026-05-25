@@ -27,6 +27,8 @@ logger = logging.getLogger("auto-whats-backend")
 OPENWA_API_URL = os.getenv("OPENWA_API_URL", "http://localhost:2785")
 OPENWA_API_KEY = os.getenv("OPENWA_API_KEY", "super-secret-api-key")
 OPENWA_SESSION_ID = os.getenv("OPENWA_SESSION_ID", "default")
+ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER", None)
+
 
 # Inicializar el cliente de OpenWA
 openwa_client = OpenWAClient(
@@ -233,6 +235,17 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
                 await db.commit()
                 await db.refresh(db_session)
             
+            # 1.1. Auto-liberación por inactividad de sesión humana (TTL de 60 minutos)
+            from datetime import datetime
+            if db_session.current_state == "human_agent" and db_session.updated_at:
+                delta = datetime.utcnow() - db_session.updated_at
+                if delta.total_seconds() > 3600:  # 60 minutos
+                    logger.info(f"⏰ [Inactividad] La sesión de soporte en vivo para {chat_id} superó los 60 minutos. Reactivando el bot...")
+                    db_session.current_state = "idle"
+                    await db.commit()
+                    await set_cached_state(chat_id, "idle")
+                    current_state = "idle"
+            
             # Si hubo un Cache Miss (no está en Redis), cargamos desde PostgreSQL y guardamos en Redis
             if current_state is None:
                 current_state = db_session.current_state
@@ -270,6 +283,18 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
                 
                 # Enviar físicamente por WhatsApp a través del cliente OpenWA
                 await openwa_client.send_text_message(chat_id=chat_id, text=text_response)
+
+            # 2.5. Control de Silencio para Intervención Humana (Human Takeover / Silencio del Bot)
+            if current_state == "human_agent":
+                # Si el usuario escribe "!menu" o "!ayuda", libera la sesión para regresar al bot automático
+                if text_input in ["!menu", "!ayuda", "menu", "ayuda"]:
+                    logger.info(f"🔓 Cliente {chat_id} solicitó salir de atención humana. Devolviendo control al bot...")
+                    await responder_y_guardar(MENU_PRINCIPAL.format(sender_name=sender_name), new_state="main_menu")
+                    return
+                
+                # Si no es un comando de liberación, entra en silencio absoluto. Guardamos en DB para el historial y retornamos.
+                logger.info(f"🤫 [Takeover Activo] Cliente {chat_id} en atención humana. Bot silenciado.")
+                return
 
             # Comandos básicos inmediatos
             if text_input in ["!ping", "ping"]:
@@ -325,7 +350,22 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
             # 3. Flujo desde Soporte
             elif current_state == "support":
                 if text_input == "21" or list_choice == "row_agente" or "agente" in text_input:
-                    await responder_y_guardar(RESPUESTA_AGENTE)
+                    # 1. Responder al cliente de forma amigable y pasarlo al estado human_agent
+                    await responder_y_guardar(RESPUESTA_AGENTE, new_state="human_agent")
+                    
+                    # 2. Enviar alerta en tiempo real al teléfono del Administrador
+                    if ADMIN_PHONE_NUMBER:
+                        alerta_msg = (
+                            f"🤖 *[Alerta de Soporte en Vivo]*\n\n"
+                            f"El cliente *{sender_name}* ({chat_id}) ha solicitado asistencia humana en este chat.\n\n"
+                            f"👉 _Por favor, abre WhatsApp Web o tu celular para responderle. El bot ha sido suspendido y silenciado para esta conversación._\n\n"
+                            f"💡 _Para reactivar el bot automático, tú o el cliente pueden escribir *!menu* en cualquier momento._"
+                        )
+                        try:
+                            logger.info(f"📢 Enviando alerta de soporte al Administrador: {ADMIN_PHONE_NUMBER}")
+                            await openwa_client.send_text_message(chat_id=ADMIN_PHONE_NUMBER, text=alerta_msg)
+                        except Exception as e:
+                            logger.error(f"❌ Error al enviar alerta de soporte al Administrador: {e}")
                     return
                 elif text_input == "22" or list_choice == "row_correo" or "correo" in text_input:
                     await responder_y_guardar(RESPUESTA_CORREO)

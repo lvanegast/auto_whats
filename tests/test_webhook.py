@@ -360,3 +360,112 @@ async def test_procesar_mensaje_redis_cache_hit():
         called_args = mock_openwa.send_text_message.call_args[1]
         assert "TECNOLOGÍA Y COMPUTACIÓN" in called_args["text"]
 
+
+@pytest.mark.asyncio
+async def test_procesar_mensaje_human_agent_silence():
+    """
+    Prueba que si el estado es 'human_agent', el bot guarde el mensaje en base de datos
+    pero no envíe ninguna respuesta automática (silencio completo).
+    """
+    data = {
+        "from": "34600000000@c.us",
+        "body": "Hola, ¿hay un humano ahí?",
+        "sender": {"pushname": "Usuario Test"}
+    }
+
+    mock_db = MagicMock()
+    mock_db.execute = AsyncMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+    mock_db.add = MagicMock()
+    
+    mock_user_session = MagicMock()
+    mock_user_session.chat_id = "34600000000@c.us"
+    mock_user_session.current_state = "human_agent"
+    mock_user_session.updated_at = None  # Evitar auto-liberación por TTL en este test
+
+    mock_session_result = MagicMock()
+    mock_session_result.scalar_one_or_none.return_value = mock_user_session
+    
+    # db.execute sólo buscará la sesión
+    mock_db.execute.return_value = mock_session_result
+
+    mock_session_local = MagicMock()
+    mock_session_local.return_value.__aenter__.return_value = mock_db
+    mock_openwa = AsyncMock()
+
+    # Redis Cache HIT: retorna 'human_agent'
+    mock_get = AsyncMock(return_value="human_agent")
+    async def async_set(*args, **kwargs):
+        return True
+
+    with patch("src.main.SessionLocal", mock_session_local), \
+         patch("src.main.openwa_client", mock_openwa), \
+         patch("src.main.get_cached_state", mock_get), \
+         patch("src.main.set_cached_state", async_set):
+        
+        await procesar_mensaje_asincrono(data)
+
+        # 1. El bot NO debe haber llamado a send_text_message (silencio absoluto)
+        mock_openwa.send_text_message.assert_not_called()
+        
+        # 2. Se debe haber guardado el mensaje en Postgres
+        assert mock_db.add.call_count >= 1  # Guarda el mensaje entrante del usuario
+
+
+@pytest.mark.asyncio
+async def test_procesar_mensaje_human_agent_release():
+    """
+    Prueba que si el estado es 'human_agent' y el cliente escribe '!menu',
+    el bot libere el control de forma interactiva y envíe el menú principal.
+    """
+    data = {
+        "from": "34600000000@c.us",
+        "body": "!menu",
+        "sender": {"pushname": "Usuario Test"}
+    }
+
+    mock_db = MagicMock()
+    mock_db.execute = AsyncMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+    mock_db.add = MagicMock()
+    
+    mock_user_session = MagicMock()
+    mock_user_session.chat_id = "34600000000@c.us"
+    mock_user_session.current_state = "human_agent"
+    mock_user_session.updated_at = None
+
+    mock_session_result = MagicMock()
+    mock_session_result.scalar_one_or_none.return_value = mock_user_session
+    mock_history_result = MagicMock()
+    mock_history_result.scalars().all.return_value = []
+    
+    # db.execute llamará primero a buscar sesión, luego a cargar historial (si continuara)
+    mock_db.execute.side_effect = [mock_session_result, mock_history_result]
+
+    mock_session_local = MagicMock()
+    mock_session_local.return_value.__aenter__.return_value = mock_db
+    mock_openwa = AsyncMock()
+
+    # Redis Cache HIT: retorna 'human_agent'
+    mock_get = AsyncMock(return_value="human_agent")
+    async def async_set(*args, **kwargs):
+        return True
+
+    with patch("src.main.SessionLocal", mock_session_local), \
+         patch("src.main.openwa_client", mock_openwa), \
+         patch("src.main.get_cached_state", mock_get), \
+         patch("src.main.set_cached_state", async_set):
+        
+        await procesar_mensaje_asincrono(data)
+
+        # 1. Se debe haber liberado el estado a 'main_menu'
+        assert mock_user_session.current_state == "main_menu"
+        
+        # 2. El bot debe haber respondido con el menú principal
+        mock_openwa.send_text_message.assert_called_once()
+        called_args = mock_openwa.send_text_message.call_args[1]
+        assert "Bienvenido a nuestro asistente virtual" in called_args["text"]
+
+
