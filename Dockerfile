@@ -3,7 +3,7 @@
 # ==============================================================================
 
 # Etapa 1: Construcción y descarga de dependencias
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 
 # Instalar uv de forma nativa desde la imagen oficial
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -17,21 +17,21 @@ WORKDIR /app
 # Copiar archivos de metadatos del proyecto primero
 COPY pyproject.toml uv.lock* README.md ./
 
-# Sincronizar las dependencias (sin instalar la app principal para aprovechar cache)
+# Sincronizar las dependencias (sin instalar la app principal para aprovechar cache) utilizando el interprete python del sistema
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --python /usr/local/bin/python
 
 # Copiar el código fuente
 COPY src/ ./src/
 
-# Sincronizar la app completa (registra el script ejecutable 'auto-whats')
+# Sincronizar la app completa (registra el script ejecutable 'auto-whats') utilizando el interprete python del sistema
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --python /usr/local/bin/python
 
 # ------------------------------------------------------------------------------
 # Etapa 2: Imagen final optimizada y ligera
 # ------------------------------------------------------------------------------
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -52,5 +52,5 @@ ENV OPENWA_API_URL=http://openwa-gateway:2785
 
 EXPOSE 8000
 
-# Arrancar la aplicación usando la arquitectura modular de uv
-CMD ["uv", "run", "auto-whats"]
+# Arrancar la aplicación importando e invocando la función de inicio de forma directa y robusta usando el interprete de la venv
+CMD ["/app/.venv/bin/python", "-c", "import src.main; src.main.start()"]

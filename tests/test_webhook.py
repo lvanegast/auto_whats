@@ -34,6 +34,24 @@ def client():
             yield test_client
 
 
+
+@pytest.fixture(autouse=True)
+def mock_redis_cache():
+    """
+    Mockea automáticamente las llamadas a Redis para evitar la conexión real en todas las pruebas.
+    """
+    mock_get = AsyncMock(return_value=None)  # Simula Cache Miss por defecto
+    mock_set = MagicMock(return_value=True)  # Simula escritura en caché exitosa (síncrona/asíncrona)
+    
+    # Hacer que set_cached_state retorne una corrutina si es esperada como asíncrona
+    async def async_set(*args, **kwargs):
+        return True
+    
+    with patch("src.main.get_cached_state", AsyncMock(return_value=None)), \
+         patch("src.main.set_cached_state", async_set):
+        yield
+
+
 def test_root_endpoint(client):
     """
     Verifica que el endpoint raíz '/' retorne la salud del servicio correctamente.
@@ -289,3 +307,56 @@ async def test_fallback_inteligencia_artificial():
         mock_openwa.send_text_message.assert_called_once()
         called_args = mock_openwa.send_text_message.call_args[1]
         assert "soporte técnico experto para bots" in called_args["text"]
+
+
+@pytest.mark.asyncio
+async def test_procesar_mensaje_redis_cache_hit():
+    """
+    Prueba que si hay un Cache Hit en Redis (ej: el usuario está en el estado 'catalog'),
+    se use ese estado directamente.
+    """
+    data = {
+        "from": "34600000000@c.us",
+        "body": "11", # Opción dentro de Catálogo
+        "sender": {"pushname": "Usuario Test"}
+    }
+
+    mock_db = MagicMock()  # Usar MagicMock para sincronizar con SQLAlchemy db
+    mock_db.execute = AsyncMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+    mock_db.add = MagicMock()
+    
+    mock_user_session = MagicMock()
+    mock_user_session.chat_id = "34600000000@c.us"
+    mock_user_session.current_state = "idle" # Estado en Postgres es 'idle' (diferente)
+
+    mock_session_result = MagicMock()
+    mock_session_result.scalar_one_or_none.return_value = mock_user_session
+    mock_history_result = MagicMock()
+    mock_history_result.scalars().all.return_value = []
+    
+    mock_db.execute.side_effect = [mock_session_result, mock_history_result]
+
+    mock_session_local = MagicMock()
+    mock_session_local.return_value.__aenter__.return_value = mock_db
+    mock_openwa = AsyncMock()
+
+    # Cache HIT en Redis: retorna 'catalog'
+    mock_get = AsyncMock(return_value="catalog")
+    async def async_set(*args, **kwargs):
+        return True
+
+    with patch("src.main.SessionLocal", mock_session_local), \
+         patch("src.main.openwa_client", mock_openwa), \
+         patch("src.main.get_cached_state", mock_get), \
+         patch("src.main.set_cached_state", async_set):
+        
+        await procesar_mensaje_asincrono(data)
+
+        # Si usó el Cache Hit ('catalog'), la opción '11' debe retornar RESPUESTA_TEC
+        # y no llamar a Gemini.
+        mock_openwa.send_text_message.assert_called_once()
+        called_args = mock_openwa.send_text_message.call_args[1]
+        assert "TECNOLOGÍA Y COMPUTACIÓN" in called_args["text"]
+

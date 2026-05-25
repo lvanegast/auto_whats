@@ -13,6 +13,7 @@ from src.client import OpenWAClient
 from src.database import Base, engine, SessionLocal
 from src.models import UserSession, MessageHistory
 from src.agent import get_ai_response
+from src.cache import get_cached_state, set_cached_state
 from sqlalchemy.future import select
 
 # Configuración básica de Logging profesional
@@ -214,10 +215,13 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
             logger.info(f"Mensaje de '{sender_name}' ({chat_id}): '{text_input}'")
 
         # ----------------------------------------------------------------------
-        # PERSISTENCIA DE ESTADOS EN BASE DE DATOS POSTGRESQL (ASÍNCRONO)
+        # PERSISTENCIA HÍBRIDA DE ESTADOS (REDIS CACHE + POSTGRESQL)
         # ----------------------------------------------------------------------
         async with SessionLocal() as db:
-            # 1. Buscar o crear la sesión de usuario
+            # 1. Intentar obtener el estado actual desde el caché de Redis (RAM)
+            current_state = await get_cached_state(chat_id)
+            
+            # Buscar o crear la sesión de usuario en PostgreSQL para consistencia y auditoría
             session_query = select(UserSession).where(UserSession.chat_id == chat_id)
             session_result = await db.execute(session_query)
             db_session = session_result.scalar_one_or_none()
@@ -229,7 +233,13 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
                 await db.commit()
                 await db.refresh(db_session)
             
-            # 2. Registrar el mensaje entrante del usuario en el historial
+            # Si hubo un Cache Miss (no está en Redis), cargamos desde PostgreSQL y guardamos en Redis
+            if current_state is None:
+                current_state = db_session.current_state
+                logger.info(f"🔄 Sincronizando estado '{current_state}' desde Postgres hacia el caché de Redis...")
+                await set_cached_state(chat_id, current_state)
+            
+            # 2. Registrar el mensaje entrante del usuario en el historial relacional
             user_msg = MessageHistory(chat_id=chat_id, role="user", body=str(raw_input))
             db.add(user_msg)
             await db.commit()
@@ -242,18 +252,18 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
             )
             history_result = await db.execute(history_query)
             db_history = history_result.scalars().all()
-            
-            # Extraer estado actual
-            current_state = db_session.current_state
 
-            # Helper para registrar respuesta enviada por el bot y guardarla en DB
+            # Helper para registrar respuesta enviada por el bot y guardarla en DB y Redis
             async def responder_y_guardar(text_response: str, new_state: str = None):
                 # Guardar en base de datos la respuesta de la app/asistente
                 bot_msg = MessageHistory(chat_id=chat_id, role="assistant", body=text_response)
                 db.add(bot_msg)
                 
-                # Actualizar el estado si es necesario
+                # Actualizar el estado si es necesario en ambas capas (Caché RAM + DB Relacional)
                 if new_state:
+                    # Actualizar en Redis
+                    await set_cached_state(chat_id, new_state)
+                    # Actualizar en PostgreSQL
                     db_session.current_state = new_state
                 
                 await db.commit()

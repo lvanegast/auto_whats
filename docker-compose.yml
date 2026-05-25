@@ -33,10 +33,12 @@ services:
       - OPENWA_API_KEY=dev-admin-key
       - OPENWA_SESSION_ID=default
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres-secret-pwd@postgres-db:5432/auto_whats_db
-      - GOOGLE_API_KEY=your-api-key-here
+      - REDIS_URL=redis://redis:6379/0
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     depends_on:
       - openwa-gateway
       - postgres-db
+      - redis
     networks:
       - whatsapp_net
 
@@ -55,6 +57,21 @@ services:
       - POSTGRES_DB=auto_whats_db
     volumes:
       - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - whatsapp_net
+
+  # ============================================================================
+  # 4. REDIS (CACHÉ RÁPIDO DE ESTADOS Y CONTROL DE CONCURRENCIA)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: whatsapp-redis-cache
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data
     networks:
       - whatsapp_net
 
