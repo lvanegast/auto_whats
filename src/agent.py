@@ -1,6 +1,7 @@
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langsmith import traceable
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -44,6 +45,7 @@ Tu objetivo es ayudar a los clientes con sus consultas y compras en WhatsApp en 
 2. Navegación asistida: Si el usuario está interesado en algún tema, guíalo invitándolo a responder con el número del menú rápido. Ejemplo: "Si deseas explorar la tecnología, escribe **11**".
 3. Enfoque exclusivo: Si te preguntan cosas que no tienen relación con la tienda (ej: recetas, programación, historias personales), responde amablemente que tu función exclusiva es asistirles con compras y consultas de la tienda."""
 
+@traceable(name="WhatsApp → Gemini", run_type="llm")
 async def get_ai_response(user_message: str, db_history: list) -> str:
     """
     Genera una respuesta inteligente de Gemini 1.5 basada en el historial del chat
