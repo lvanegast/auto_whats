@@ -2,6 +2,7 @@ import os
 import httpx
 import logging
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
@@ -25,10 +26,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("auto-whats-backend")
 
+# Inicializar FastAPI desactivando Swagger y ReDoc por defecto
 app = FastAPI(
     title="WhatsApp Automation Backend",
     description="Servicio backend en Python para procesar eventos y lógica de negocio de WhatsApp.",
-    version="2.0.0"
+    version="2.0.0",
+    docs_url=None,
+    redoc_url=None
 )
 
 # Registrar Routers de la capa de presentación (API)
@@ -39,6 +43,40 @@ app.include_router(webhook_router)
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+# ==============================================================================
+# SCALAR: Documentación de API interactiva y moderna de última generación
+# ==============================================================================
+@app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+async def scalar_api_reference():
+    """
+    Sirve la documentación de la API con Scalar, ofreciendo una experiencia
+    visual interactiva y moderna, con generador de snippets integrado.
+    """
+    html_content = """
+    <!doctype html>
+    <html>
+      <head>
+        <title>WhatsApp Automation API Reference</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          body {
+            margin: 0;
+          }
+        </style>
+      </head>
+      <body>
+        <!-- Configuración de Scalar -->
+        <script
+          id="api-reference"
+          data-url="/openapi.json"
+          data-configuration='{"theme": "purple", "layout": "sidebar"}'></script>
+        <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 # ==============================================================================
 # LANGSERVE: Exposición del Asistente de LangGraph como API REST con Playground
