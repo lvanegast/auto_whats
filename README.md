@@ -136,6 +136,16 @@ Asegúrate de que el gateway apunte al backend:
 uv run python scripts/register_webhook.py
 ```
 
+### 6. Sembrar Catálogo de Productos (Poblar la Base de Datos)
+
+Para que tu base de datos recién creada tenga los productos interactivos de ejemplo (Laptops, Celulares, Audífonos), ejecuta el script de siembra automática:
+
+```bash
+uv run python scripts/seed_products.py
+```
+
+*(Nota: El sistema creará automáticamente las tablas relacionales de PostgreSQL la primera vez que se conecte gracias a la inicialización automática de SQLAlchemy en el arranque).*
+
 ---
 
 ## 🔄 Aplicar Cambios al Contenedor
