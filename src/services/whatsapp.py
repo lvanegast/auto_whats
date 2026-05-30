@@ -1,3 +1,4 @@
+import os
 import logging
 from typing import Any, Dict, Optional
 import httpx
@@ -103,3 +104,14 @@ class OpenWAClient:
                 logger.error(f"Error de conexión al intentar enviar botones: {e}")
                 raise e
 
+# Inicialización única de configuración compartida
+OPENWA_API_URL = os.getenv("OPENWA_API_URL", "http://localhost:2785")
+OPENWA_API_KEY = os.getenv("OPENWA_API_KEY", "super-secret-api-key")
+OPENWA_SESSION_ID = os.getenv("OPENWA_SESSION_ID", "default")
+ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER", None)
+
+openwa_client = OpenWAClient(
+    base_url=OPENWA_API_URL,
+    api_key=OPENWA_API_KEY,
+    session_id=OPENWA_SESSION_ID
+)

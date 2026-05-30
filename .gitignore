@@ -31,3 +31,7 @@ codigo_qr.png
 qr_code.png
 *.log
 scratch/
+
+# Excluir suite de pruebas y scripts de desarrollo del repositorio de Git
+tests/
+scripts/

@@ -1,19 +1,19 @@
 """
-admin.py — Router del Panel de Administración de Flow Bot.
+admin_router.py — Router del Panel de Administración de Flow Bot.
 Rutas protegidas con X-Admin-Key. Incluye CRUD de productos,
 listado de conversaciones y métricas del dashboard.
 """
 import os
 from typing import Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import FileResponse
 from sqlalchemy.future import select
 from sqlalchemy import func, desc
 
-from src.database import SessionLocal
-from src.models import UserSession, MessageHistory, Product
+from src.core.database import SessionLocal
+from src.models.domain import UserSession, MessageHistory, Product
+from src.schemas.dtos import ProductCreate, ProductUpdate
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -37,29 +37,8 @@ async def verify_admin(x_admin_key: Optional[str] = Header(None)):
 @router.get("/", include_in_schema=False)
 async def admin_ui():
     """Sirve la interfaz de administración como SPA."""
-    html_path = os.path.join(os.path.dirname(__file__), "static", "admin", "index.html")
+    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "admin", "index.html")
     return FileResponse(html_path)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# SCHEMAS (Pydantic)
-# ──────────────────────────────────────────────────────────────────────────────
-
-class ProductCreate(BaseModel):
-    name: str
-    description: str
-    price: float
-    stock: int
-    category: str   # "tech" | "phones" | "audio"
-    active: bool = True
-
-class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    price: Optional[float] = None
-    stock: Optional[int] = None
-    category: Optional[str] = None
-    active: Optional[bool] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────

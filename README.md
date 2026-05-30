@@ -73,6 +73,15 @@ hola / menu / inicio
 
 ---
 
+## 📦 Seguridad y Despliegue en la Nube (Producción vs Desarrollo)
+
+Para garantizar un despliegue profesional, limpio y seguro en producción (nube), **los archivos de pruebas y de desarrollo están estrictamente excluidos de la imagen Docker final**:
+
+1. **`.dockerignore`**: Excluye carpetas locales de base de datos, entornos virtuales (`.venv`), la suite de pruebas (`tests/`), scripts de desarrollo (`scripts/`), y archivos de configuración local como `.git`. Esto evita subir "basura" o dependencias locales pesadas al contexto de construcción de Docker.
+2. **Construcción en Etapas (Multi-stage Build)**: El `Dockerfile` utiliza `uv` y copia **únicamente** la carpeta `src/` (`COPY src/ ./src/`) y los metadatos de dependencias (`pyproject.toml`, `uv.lock`). Como resultado, los scripts de `scripts/` y los archivos de `tests/` nunca entran en la imagen que se ejecuta en la nube, garantizando que el entorno de producción esté libre de código de pruebas y archivos basura.
+
+---
+
 ## 🚀 Cómo Iniciar el Ecosistema
 
 ### 1. Requisitos Previos
@@ -114,7 +123,7 @@ Esto inicia en un solo comando:
 Si es la primera vez, necesitas escanear el código QR:
 
 ```bash
-uv run test-send
+uv run python tests/test_send.py
 ```
 
 Esto generará `codigo_qr.png` en la raíz. Escanéalo desde WhatsApp → **Dispositivos vinculados**.
@@ -146,7 +155,7 @@ docker compose up -d --build
 Ejecuta la suite completa de tests unitarios:
 
 ```bash
-uv run pytest tests/ -v
+uv run pytest
 ```
 
 Los tests cubren:
@@ -160,24 +169,37 @@ Los tests cubren:
 
 ## 📁 Estructura del Proyecto
 
+El proyecto está diseñado bajo principios de **Clean Architecture**, dividiendo responsabilidades en capas lógicas bien definidas:
+
 ```
 auto_whats/
 ├── src/
-│   ├── main.py          # FastAPI app, webhook, enrutador de estados, takeover
-│   ├── agent.py         # Integración con Gemini 2.5 Flash (lenguaje natural)
-│   ├── agent_graph.py   # Grafo LangGraph (LangServe playground)
-│   ├── cache.py         # Funciones Redis (get/set estados de sesión)
-│   ├── client.py        # Cliente HTTP para OpenWA REST API
-│   ├── database.py      # Configuración SQLAlchemy async + PostgreSQL
-│   └── models.py        # Modelos ORM: UserSession, MessageHistory
+│   ├── api/
+│   │   ├── admin_router.py      # Endpoints del Panel de Administración CRUD
+│   │   └── webhook_router.py    # Endpoints de Webhook y procesador asíncrono
+│   ├── core/
+│   │   ├── cache.py             # Conexión y utilidades del caché de Redis
+│   │   └── database.py          # Configuración SQLAlchemy async + PostgreSQL
+│   ├── models/
+│   │   └── domain.py            # Modelos ORM: UserSession, MessageHistory, Product
+│   ├── schemas/
+│   │   └── dtos.py              # Modelos de validación Pydantic
+│   ├── services/
+│   │   ├── bot_engine.py        # Grafo de estados LangGraph, nodos y lógica
+│   │   └── whatsapp.py          # Cliente HTTP para OpenWA Gateway
+│   ├── static/
+│   │   └── admin/               # SPA HTML/CSS/JS del Panel de Administración
+│   └── main.py                  # Orquestador del servicio, registro de routers y LangServe
 ├── tests/
-│   └── test_webhook.py  # Suite de tests unitarios (11 tests)
+│   ├── test_send.py             # Asistente de configuración de QR y envío manual
+│   └── test_webhook.py          # Suite de tests unitarios (11 tests)
 ├── scripts/
-│   └── register_webhook.py  # Script para registrar el webhook en OpenWA
-├── docker-compose.yml   # Orquestación: OpenWA + FastAPI + PostgreSQL + Redis
-├── Dockerfile           # Imagen Python 3.13-slim con uv
-├── pyproject.toml       # Dependencias y scripts del proyecto
-└── .env                 # Variables de entorno (no se versiona)
+│   ├── seed_products.py         # Script para sembrar productos iniciales en PostgreSQL
+│   └── register_webhook.py      # Script para registrar el webhook en OpenWA
+├── docker-compose.yml           # Orquestación de contenedores locales
+├── Dockerfile                   # Dockerfile Multi-stage optimizado con uv
+├── pyproject.toml               # Dependencias del proyecto Python
+└── .dockerignore                # Archivo para evitar subir tests o db locales a la nube
 ```
 
 ---

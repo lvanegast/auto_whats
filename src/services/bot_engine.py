@@ -1,5 +1,5 @@
 """
-agent_graph.py - Cerebro Central del Bot de WhatsApp usando LangGraph
+bot_engine.py - Cerebro Central del Bot de WhatsApp usando LangGraph
 Contiene los Nodos (pantallas) y Bordes (rutas) de la máquina de estados.
 """
 import os
@@ -12,8 +12,8 @@ from langgraph.graph import StateGraph, START, END
 from langsmith import traceable
 from dotenv import load_dotenv
 
-from src.database import SessionLocal
-from src.models import Product
+from src.core.database import SessionLocal
+from src.models.domain import Product
 from sqlalchemy.future import select
 
 load_dotenv()
