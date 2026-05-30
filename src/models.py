@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey
+from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, Boolean, Numeric
 from sqlalchemy.orm import relationship
 from src.database import Base
 
@@ -30,3 +30,21 @@ class MessageHistory(Base):
 
     # Relación inversa
     session = relationship("UserSession", back_populates="messages")
+
+
+class Product(Base):
+    """
+    Catálogo de productos de la tienda. Gestionable desde el panel de administración.
+    Categorías válidas: 'tech' | 'phones' | 'audio'
+    """
+    __tablename__ = "products"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    name        = Column(String(120), nullable=False)
+    description = Column(Text, nullable=False)
+    price       = Column(Numeric(10, 2), nullable=False)
+    stock       = Column(Integer, default=0, nullable=False)
+    category    = Column(String(50), nullable=False)   # "tech" | "phones" | "audio"
+    active      = Column(Boolean, default=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

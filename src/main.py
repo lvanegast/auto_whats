@@ -3,6 +3,7 @@ import httpx
 import logging
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -11,14 +12,15 @@ load_dotenv()
 
 from src.client import OpenWAClient
 from src.database import Base, engine, SessionLocal
-from src.models import UserSession, MessageHistory
+from src.models import UserSession, MessageHistory, Product
 from src.agent import get_ai_response
 from src.agent_graph import bot_graph, BotState
 from src.cache import get_cached_state, set_cached_state
+from src.admin import router as admin_router
 from sqlalchemy.future import select
 from langserve import add_routes
 from langchain_core.runnables import RunnableLambda
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Configuración básica de Logging profesional
 logging.basicConfig(
@@ -44,8 +46,16 @@ openwa_client = OpenWAClient(
 app = FastAPI(
     title="WhatsApp Automation Backend",
     description="Servicio backend en Python para procesar eventos y lógica de negocio de WhatsApp.",
-    version="1.0.0"
+    version="2.0.0"
 )
+
+# Panel de administración
+app.include_router(admin_router)
+
+# Archivos estáticos del panel (CSS/JS si se separan en el futuro)
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 # ==============================================================================
 # LANGSERVE: Exposición del Agente de LangGraph como API REST con Playground
@@ -211,24 +221,57 @@ Selecciona la duda que deseas resolver:
 
 *0️⃣ Volver al Menú Principal* 🔙"""
 
-RESPUESTA_TEC = """💻 *TECNOLOGÍA Y COMPUTACIÓN*
-Disponemos de laptops de última generación, monitores 4K y accesorios ergonómicos con descuentos del 15%.
-Visita nuestra tienda para más información.
 
-*0️⃣ Volver al Menú Principal* 🔙
-*1️⃣ Volver al Catálogo* 📦"""
+# Las respuestas de catálogo se generan dinámicamente desde PostgreSQL (ver función abajo).
+# Se mantienen estas constantes solo como fallback si la BD falla.
+_CATALOGO_FALLBACK = {
+    "tech":   "💻 *TECNOLOGÍA Y COMPUTACIÓN*\n_No hay productos disponibles en este momento._\n\n*0️⃣ Volver al Menú Principal* 🔙\n*1️⃣ Volver al Catálogo* 📦",
+    "phones": "📱 *CELULARES Y ACCESORIOS*\n_No hay productos disponibles en este momento._\n\n*0️⃣ Volver al Menú Principal* 🔙\n*1️⃣ Volver al Catálogo* 📦",
+    "audio":  "🎧 *AUDIO Y SONIDO*\n_No hay productos disponibles en este momento._\n\n*0️⃣ Volver al Menú Principal* 🔙\n*1️⃣ Volver al Catálogo* 📦",
+}
 
-RESPUESTA_CEL = """📱 *CELULARES Y ACCESORIOS*
-Encuentra los últimos modelos de smartphones y cargadores inalámbricos premium con envío gratis a nivel nacional.
+_CATALOGO_EMOJIS = {"tech": "💻", "phones": "📱", "audio": "🎧"}
+_CATALOGO_TITULOS = {"tech": "TECNOLOGÍA Y COMPUTACIÓN", "phones": "CELULARES Y ACCESORIOS", "audio": "AUDIO Y SONIDO"}
 
-*0️⃣ Volver al Menú Principal* 🔙
-*1️⃣ Volver al Catálogo* 📦"""
+async def get_catalogo_categoria(db, category: str) -> str:
+    """Consulta los productos activos de una categoría y los formatea para WhatsApp."""
+    try:
+        q = await db.execute(
+            select(Product)
+            .where(Product.category == category, Product.active == True)
+            .order_by(Product.id)
+        )
+        products = q.scalars().all()
 
-RESPUESTA_AUD = """🎧 *AUDIO Y SONIDO*
-Audífonos con cancelación de ruido activa y parlantes bluetooth impermeables de alta fidelidad.
+        emoji  = _CATALOGO_EMOJIS.get(category, "📦")
+        titulo = _CATALOGO_TITULOS.get(category, category.upper())
 
-*0️⃣ Volver al Menú Principal* 🔙
-*1️⃣ Volver al Catálogo* 📦"""
+        if not products:
+            return (
+                f"{emoji} *{titulo}*\n\n"
+                "_No hay productos disponibles en esta categoría por el momento._\n\n"
+                "*0️⃣ Volver al Menú Principal* 🔙\n"
+                "*1️⃣ Volver al Catálogo* 📦"
+            )
+
+        lines = [f"{emoji} *{titulo}*\n"]
+        for i, p in enumerate(products, 1):
+            stock_icon = "✅" if p.stock > 0 else "❌"
+            stock_txt  = f"En stock ({p.stock})" if p.stock > 0 else "Sin stock"
+            lines.append(
+                f"*{i}.* {p.name}\n"
+                f"     💰 *${float(p.price):.2f}* | {stock_icon} {stock_txt}\n"
+                f"     _{p.description}_"
+            )
+
+        lines.append("\n*0️⃣ Volver al Menú Principal* 🔙")
+        lines.append("*1️⃣ Volver al Catálogo* 📦")
+        return "\n\n".join(lines[:1] + lines[1:])
+
+    except Exception as e:
+        logger.error(f"❌ Error consultando catálogo '{category}': {e}")
+        return _CATALOGO_FALLBACK.get(category, "Error al cargar catálogo.")
+
 
 RESPUESTA_AGENTE = """💬 *CONECTANDO CON UN AGENTE*
 Tu solicitud ha sido transferida a nuestro equipo técnico. Un agente humano se pondrá en contacto contigo en este chat en los próximos 5 minutos.
@@ -368,116 +411,52 @@ async def procesar_mensaje_asincrono(data: Dict[str, Any]):
                 # Enviar físicamente por WhatsApp a través del cliente OpenWA
                 await openwa_client.send_text_message(chat_id=chat_id, text=text_response)
 
-            # 2.5. Control de Silencio para Intervención Humana (Human Takeover / Silencio del Bot)
-            if current_state == "human_agent":
-                # Si el usuario escribe "!menu" o "!ayuda", libera la sesión para regresar al bot automático
-                if text_input in ["!menu", "!ayuda", "menu", "ayuda"]:
-                    logger.info(f"🔓 Cliente {chat_id} solicitó salir de atención humana. Devolviendo control al bot...")
-                    await responder_y_guardar(MENU_PRINCIPAL.format(sender_name=sender_name), new_state="main_menu")
-                    return
+            # ----------------------------------------------------------------------
+            # INVOCACIÓN DEL CEREBRO CENTRAL (LANGGRAPH)
+            # ----------------------------------------------------------------------
+            logger.info(f"Invocando Grafo Central para {chat_id} (Estado: {current_state})...")
+            
+            # Transformar historial de DB al formato que entiende LangChain/LangGraph
+            chat_history = []
+            for msg in db_history:
+                if msg.role == "user":
+                    chat_history.append(HumanMessage(content=msg.body))
+                else:
+                    chat_history.append(AIMessage(content=msg.body))
+            
+            # Ejecutar el grafo de estados
+            graph_input = {
+                "chat_id": chat_id,
+                "sender_name": sender_name,
+                "user_input": text_input,
+                "current_state": current_state,
+                "chat_history": chat_history
+            }
+            
+            state_result = await bot_graph.ainvoke(graph_input)
+            
+            response_text = state_result.get("response_text")
+            new_state = state_result.get("new_state")
+            admin_alert = state_result.get("admin_alert")
+            
+            # 1. Enviar respuesta al cliente (si el nodo generó una)
+            if response_text:
+                await responder_y_guardar(response_text, new_state)
+            elif new_state and new_state != current_state:
+                # Si no hay texto pero el estado cambió (ej. silencio de human_agent)
+                await set_cached_state(chat_id, new_state)
+                db_session.current_state = new_state
+                await db.commit()
+            else:
+                logger.info(f"🤫 Silencio mantenido por el bot (Estado: {current_state})")
                 
-                # Si no es un comando de liberación, entra en silencio absoluto. Guardamos en DB para el historial y retornamos.
-                logger.info(f"🤫 [Takeover Activo] Cliente {chat_id} en atención humana. Bot silenciado.")
-                return
-
-            # Comandos básicos inmediatos
-            if text_input in ["!ping", "ping"]:
-                logger.info("Comando !ping detectado. Respondiendo...")
-                await responder_y_guardar(
-                    f"¡Hola {sender_name}! ¡Pong! 🏓 El backend asíncrono con PostgreSQL está en línea y funcionando perfectamente."
-                )
-                return
-
-            # Comandos para desplegar o reiniciar el menú principal
-            if text_input in ["!ayuda", "ayuda", "!menu", "menu", "hola", "hi", "inicio", "empezar"]:
-                logger.info(f"Comando de inicio/ayuda detectado. Enviando menú principal a {chat_id}...")
-                await responder_y_guardar(MENU_PRINCIPAL.format(sender_name=sender_name), new_state="main_menu")
-                return
-
-            # Atajo global para volver al menú principal en cualquier momento
-            if text_input == "0" or selected_button == "btn_menu_principal" or list_choice == "row_menu_principal":
-                logger.info("Atajo global recibido. Volviendo al menú principal...")
-                await responder_y_guardar(MENU_PRINCIPAL.format(sender_name=sender_name), new_state="main_menu")
-                return
-
-            # ----------------------------------------------------------------------
-            # ENRUTADOR E INTEGRADOR DE INTERACCIONES HÍBRIDAS (ESTÁTICO / DINÁMICO)
-            # ----------------------------------------------------------------------
-            
-            # 1. Flujo desde Menú Principal
-            if current_state == "main_menu":
-                if text_input == "1" or selected_button == "btn_catalogo" or list_choice == "row_catalogo" or "catálogo" in text_input:
-                    await responder_y_guardar(MENU_CATALOGO, new_state="catalog")
-                    return
-                elif text_input == "2" or selected_button == "btn_soporte" or list_choice == "row_soporte" or "soporte" in text_input:
-                    await responder_y_guardar(MENU_SOPORTE, new_state="support")
-                    return
-                elif text_input == "3" or selected_button == "btn_faq" or list_choice == "row_faq" or "preguntas" in text_input:
-                    await responder_y_guardar(MENU_FAQ, new_state="faq")
-                    return
-
-            # 2. Flujo desde Catálogo
-            elif current_state == "catalog":
-                if text_input == "11" or list_choice == "row_tec" or "tecnología" in text_input:
-                    await responder_y_guardar(RESPUESTA_TEC)
-                    return
-                elif text_input == "12" or list_choice == "row_cel" or "celulares" in text_input:
-                    await responder_y_guardar(RESPUESTA_CEL)
-                    return
-                elif text_input == "13" or list_choice == "row_aud" or "audio" in text_input:
-                    await responder_y_guardar(RESPUESTA_AUD)
-                    return
-                elif text_input == "1":
-                    await responder_y_guardar(MENU_CATALOGO)
-                    return
-
-            # 3. Flujo desde Soporte
-            elif current_state == "support":
-                if text_input == "21" or list_choice == "row_agente" or "agente" in text_input:
-                    # 1. Responder al cliente de forma amigable y pasarlo al estado human_agent
-                    await responder_y_guardar(RESPUESTA_AGENTE, new_state="human_agent")
-                    
-                    # 2. Enviar alerta en tiempo real al teléfono del Administrador
-                    if ADMIN_PHONE_NUMBER:
-                        alerta_msg = (
-                            f"🤖 *[Alerta de Soporte en Vivo]*\n\n"
-                            f"El cliente *{sender_name}* ({chat_id}) ha solicitado asistencia humana en este chat.\n\n"
-                            f"👉 _Por favor, abre WhatsApp Web o tu celular para responderle. El bot ha sido suspendido y silenciado para esta conversación._\n\n"
-                            f"💡 _Para reactivar el bot automático, tú o el cliente pueden escribir *!menu* en cualquier momento._"
-                        )
-                        try:
-                            logger.info(f"📢 Enviando alerta de soporte al Administrador: {ADMIN_PHONE_NUMBER}")
-                            await openwa_client.send_text_message(chat_id=ADMIN_PHONE_NUMBER, text=alerta_msg)
-                        except Exception as e:
-                            logger.error(f"❌ Error al enviar alerta de soporte al Administrador: {e}")
-                    return
-                elif text_input == "22" or list_choice == "row_correo" or "correo" in text_input:
-                    await responder_y_guardar(RESPUESTA_CORREO)
-                    return
-
-            # 4. Flujo desde FAQ
-            elif current_state == "faq":
-                if text_input == "31" or list_choice == "row_envio" or "envío" in text_input:
-                    await responder_y_guardar(RESPUESTA_ENVIO)
-                    return
-                elif text_input == "32" or list_choice == "row_pago" or "pago" in text_input:
-                    await responder_y_guardar(RESPUESTA_PAGO)
-                    return
-                elif text_input == "33" or list_choice == "row_devolucion" or "devolución" in text_input:
-                    await responder_y_guardar(RESPUESTA_DEVOLUCION)
-                    return
-                elif text_input == "3":
-                    await responder_y_guardar(MENU_FAQ)
-                    return
-
-            # ----------------------------------------------------------------------
-            # FALLBACK DE LENGUAJE NATURAL: INVOCAR INTELIGENCIA ARTIFICIAL (GEMINI)
-            # ----------------------------------------------------------------------
-            logger.info(f"Interacción libre en lenguaje natural detectada para {chat_id}. Invocando Gemini...")
-            ai_reply = await get_ai_response(user_message=str(body or ""), db_history=db_history)
-            
-            # Responder al cliente con la respuesta de la IA
-            await responder_y_guardar(ai_reply)
+            # 2. Enviar alerta en tiempo real al teléfono del Administrador
+            if admin_alert and ADMIN_PHONE_NUMBER:
+                try:
+                    logger.info(f"📢 Enviando alerta de soporte al Administrador: {ADMIN_PHONE_NUMBER}")
+                    await openwa_client.send_text_message(chat_id=ADMIN_PHONE_NUMBER, text=admin_alert)
+                except Exception as e:
+                    logger.error(f"❌ Error al enviar alerta de soporte al Administrador: {e}")
 
     except Exception as e:
         logger.error(f"Error procesando el mensaje asíncronamente: {e}", exc_info=True)

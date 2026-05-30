@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Bot — Panel de Administración</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #0b0b14;
+      --bg2:       #11111f;
+      --bg3:       #181828;
+      --glass:     rgba(255,255,255,0.04);
+      --border:    rgba(255,255,255,0.07);
+      --purple:    #7c3aed;
+      --purple-lt: #a78bfa;
+      --green:     #10b981;
+      --green-lt:  #34d399;
+      --red:       #ef4444;
+      --yellow:    #f59e0b;
+      --text:      #e2e8f0;
+      --text-muted:#94a3b8;
+      --radius:    12px;
+      --shadow:    0 4px 32px rgba(0,0,0,0.4);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+    }
+
+    /* ── LOGIN ───────────────────────────────────── */
+    #login-screen {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      z-index: 999;
+    }
+    .login-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px 40px;
+      width: 360px;
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+    .login-card .logo { font-size: 48px; margin-bottom: 12px; }
+    .login-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .login-card p  { color: var(--text-muted); font-size: 14px; margin-bottom: 28px; }
+    .login-card input {
+      width: 100%; padding: 12px 16px; border-radius: var(--radius);
+      border: 1px solid var(--border); background: var(--bg2);
+      color: var(--text); font-size: 15px; outline: none;
+      transition: border-color .2s;
+      margin-bottom: 16px;
+    }
+    .login-card input:focus { border-color: var(--purple); }
+    .login-card button {
+      width: 100%; padding: 13px;
+      background: linear-gradient(135deg, var(--purple), #6d28d9);
+      color: #fff; font-weight: 600; font-size: 15px;
+      border: none; border-radius: var(--radius); cursor: pointer;
+      transition: opacity .2s, transform .1s;
+    }
+    .login-card button:hover  { opacity: .9; }
+    .login-card button:active { transform: scale(.98); }
+    #login-error {
+      color: var(--red); font-size: 13px; margin-top: 12px;
+      display: none;
+    }
+
+    /* ── SIDEBAR ─────────────────────────────────── */
+    #sidebar {
+      width: 240px; min-height: 100vh;
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      padding: 24px 16px;
+      position: fixed; top: 0; left: 0; bottom: 0;
+      z-index: 10;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      padding: 4px 8px; margin-bottom: 32px;
+    }
+    .brand .icon { font-size: 28px; }
+    .brand-text { font-size: 16px; font-weight: 700; }
+    .brand-text span { color: var(--purple-lt); }
+
+    nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 14px; border-radius: var(--radius);
+      cursor: pointer; font-size: 14px; font-weight: 500;
+      color: var(--text-muted); transition: all .18s;
+      border: 1px solid transparent;
+    }
+    .nav-item:hover  { background: var(--glass); color: var(--text); }
+    .nav-item.active {
+      background: rgba(124,58,237,.18);
+      color: var(--purple-lt);
+      border-color: rgba(124,58,237,.25);
+    }
+    .nav-item .ni { font-size: 18px; }
+
+    .sidebar-footer {
+      padding: 12px 14px; border-radius: var(--radius);
+      background: var(--glass); border: 1px solid var(--border);
+      font-size: 12px; color: var(--text-muted);
+    }
+    .sidebar-footer strong { color: var(--green-lt); display: block; margin-bottom: 2px; }
+
+    /* ── MAIN ────────────────────────────────────── */
+    #main {
+      margin-left: 240px; flex: 1; padding: 32px;
+      max-width: calc(100vw - 240px);
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-header {
+      margin-bottom: 28px;
+    }
+    .page-header h2 { font-size: 24px; font-weight: 700; }
+    .page-header p  { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+
+    /* ── CARDS ───────────────────────────────────── */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px; margin-bottom: 32px;
+    }
+    .card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 20px;
+      transition: transform .18s, box-shadow .18s;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .card-label { font-size: 12px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: .6px; }
+    .card-value { font-size: 36px; font-weight: 800; margin: 6px 0 4px; }
+    .card-sub   { font-size: 12px; color: var(--text-muted); }
+    .card.purple .card-value { color: var(--purple-lt); }
+    .card.green  .card-value { color: var(--green-lt); }
+    .card.yellow .card-value { color: var(--yellow); }
+    .card.red    .card-value { color: var(--red); }
+
+    /* ── TABLES ──────────────────────────────────── */
+    .table-wrap {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .table-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+    .table-toolbar h3 { font-size: 15px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: var(--bg2); padding: 11px 16px;
+      text-align: left; font-size: 12px; font-weight: 600;
+      color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--glass); }
+    tbody td { padding: 12px 16px; font-size: 14px; }
+
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; border-radius: 99px;
+      font-size: 11px; font-weight: 600; letter-spacing: .3px;
+    }
+    .badge.green  { background: rgba(16,185,129,.15); color: var(--green-lt); }
+    .badge.purple { background: rgba(124,58,237,.18); color: var(--purple-lt); }
+    .badge.red    { background: rgba(239,68,68,.15);  color: #fca5a5; }
+    .badge.yellow { background: rgba(245,158,11,.15); color: #fcd34d; }
+    .badge.gray   { background: rgba(148,163,184,.1); color: var(--text-muted); }
+
+    /* ── BUTTONS ─────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      border: none; transition: all .18s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--purple), #6d28d9);
+      color: #fff;
+    }
+    .btn-primary:hover { opacity: .88; transform: translateY(-1px); }
+    .btn-ghost {
+      background: var(--glass); border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .btn-ghost:hover { color: var(--text); background: rgba(255,255,255,.08); }
+    .btn-danger {
+      background: rgba(239,68,68,.15); color: #fca5a5;
+      border: 1px solid rgba(239,68,68,.2);
+    }
+    .btn-danger:hover { background: rgba(239,68,68,.25); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    .icon-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 5px 8px; border-radius: 6px;
+      font-size: 15px; transition: background .15s;
+      color: var(--text-muted);
+    }
+    .icon-btn:hover { background: var(--glass); color: var(--text); }
+
+    /* ── MODAL ───────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.65);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100; opacity: 0; pointer-events: none;
+      transition: opacity .2s;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 20px; padding: 32px;
+      width: 480px; max-width: 95vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+      transform: translateY(16px); transition: transform .2s;
+    }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%; padding: 10px 14px;
+      background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; font-size: 14px;
+      outline: none; transition: border-color .18s;
+      font-family: inherit;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus { border-color: var(--purple); }
+    .form-group textarea { resize: vertical; min-height: 72px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+    /* ── CHAT HISTORY ────────────────────────────── */
+    .chat-back {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--purple-lt); cursor: pointer;
+      font-size: 14px; font-weight: 500; margin-bottom: 20px;
+    }
+    .chat-back:hover { text-decoration: underline; }
+    .messages-wrap {
+      display: flex; flex-direction: column; gap: 10px;
+      max-height: 60vh; overflow-y: auto; padding-right: 4px;
+    }
+    .msg {
+      max-width: 72%; padding: 10px 14px;
+      border-radius: 14px; font-size: 14px; line-height: 1.5;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: rgba(124,58,237,.22);
+      border: 1px solid rgba(124,58,237,.3);
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+    }
+    .msg-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── LOADING ─────────────────────────────────── */
+    .spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--purple);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-row td { text-align: center; padding: 32px; color: var(--text-muted); }
+
+    /* ── TOAST ───────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 20px;
+      font-size: 14px; font-weight: 500;
+      box-shadow: var(--shadow);
+      transform: translateY(80px); opacity: 0;
+      transition: all .25s; z-index: 200;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.success { border-left: 3px solid var(--green); }
+    #toast.error   { border-left: 3px solid var(--red); }
+
+    /* ── SCROLLBAR ───────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ LOGIN ═══════════════════ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="logo">🤖</div>
+    <h1>Flow Bot Admin</h1>
+    <p>Ingresa tu clave de administrador para continuar</p>
+    <input type="password" id="admin-key-input" placeholder="Clave de administrador" />
+    <button onclick="doLogin()">Entrar al panel</button>
+    <div id="login-error">❌ Clave incorrecta. Inténtalo de nuevo.</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ APP ═══════════════════ -->
+<div id="app" style="display:none; width:100%;">
+
+  <!-- SIDEBAR -->
+  <nav id="sidebar">
+    <div class="brand">
+      <span class="icon">🤖</span>
+      <span class="brand-text">Flow <span>Bot</span></span>
+    </div>
+    <nav>
+      <div class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
+        <span class="ni">📊</span> Dashboard
+      </div>
+      <div class="nav-item" onclick="showPage('conversations')" id="nav-conversations">
+        <span class="ni">💬</span> Conversaciones
+      </div>
+      <div class="nav-item" onclick="showPage('products')" id="nav-products">
+        <span class="ni">📦</span> Catálogo
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <strong>🟢 Sistema activo</strong>
+      Flow Bot v2.0 — Panel Admin
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div id="main">
+
+    <!-- ── DASHBOARD ── -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h2>Dashboard</h2>
+        <p>Resumen general del bot y métricas en tiempo real</p>
+      </div>
+      <div class="cards-grid" id="stats-grid">
+        <div class="card"><div class="card-label">Cargando...</div><div class="card-value">—</div></div>
+      </div>
+    </div>
+
+    <!-- ── CONVERSACIONES ── -->
+    <div class="page" id="page-conversations">
+      <div class="page-header">
+        <h2>Conversaciones</h2>
+        <p>Historial de todos los usuarios que han interactuado con el bot</p>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <h3>Usuarios activos</h3>
+          <button class="btn btn-ghost" onclick="loadConversations()">🔄 Actualizar</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Chat ID</th>
+              <th>Estado</th>
+              <th>Mensajes</th>
+              <th>Último mensaje</th>
+              <th>Actualizado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="conv-tbody">
+            <tr class="loading-row"><td colspan="6"><div class="spinner"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── CHAT DETAIL ── -->
+    <div class="page" id="page-chat-detail">
+      <div class="chat-back" onclick="showPage('conversations')">← Volver a Conversaciones</div>
+      <div class="page-header">
+        <h2 id="chat-detail-title">Chat</h2>
+        <p id="chat-detail-sub"></p>
+      </div>
+      <div class="table-wrap" style="padding: 20px;">
+        <div class="messages-wrap" id="messages-wrap"></div>
+      </div>
+    </div>
+
+    <!-- ── PRODUCTOS ── -->
+    <div class="page" id="page-products">
+      <div class="page-header">
+        <h2>Catálogo de Productos</h2>
+        <p>Gestiona los productos que el bot muestra a los clientes</p>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <h3>Todos los productos</h3>
+          <button class="btn btn-primary" onclick="openProductModal()">＋ Nuevo producto</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Nombre</th>
+              <th>Descripción</th>
+              <th>Precio</th>
+              <th>Stock</th>
+              <th>Categoría</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="products-tbody">
+            <tr class="loading-row"><td colspan="8"><div class="spinner"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ── MODAL PRODUCTO ── -->
+<div class="modal-overlay" id="product-modal">
+  <div class="modal">
+    <h3 id="modal-title">Nuevo Producto</h3>
+    <input type="hidden" id="edit-product-id" />
+    <div class="form-group">
+      <label>Nombre</label>
+      <input type="text" id="f-name" placeholder="Ej: Laptop Asus VivoBook" />
+    </div>
+    <div class="form-group">
+      <label>Descripción breve</label>
+      <textarea id="f-desc" placeholder="Ej: Ryzen 5, 8GB RAM, SSD 512GB"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Precio (USD)</label>
+        <input type="number" id="f-price" placeholder="0.00" step="0.01" min="0" />
+      </div>
+      <div class="form-group">
+        <label>Stock</label>
+        <input type="number" id="f-stock" placeholder="0" min="0" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Categoría</label>
+      <select id="f-category">
+        <option value="tech">💻 Tecnología y Computación</option>
+        <option value="phones">📱 Celulares y Accesorios</option>
+        <option value="audio">🎧 Audio y Sonido</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Estado</label>
+      <select id="f-active">
+        <option value="true">✅ Activo (visible en el bot)</option>
+        <option value="false">❌ Inactivo (oculto en el bot)</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeProductModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveProduct()">💾 Guardar producto</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── TOAST ── -->
+<div id="toast"></div>
+
+<script>
+  // ── CONFIG ────────────────────────────────────────────────────
+  let ADMIN_KEY = '';
+  const API = '';  // misma origin
+
+  // ── AUTH ──────────────────────────────────────────────────────
+  async function doLogin() {
+    const key = document.getElementById('admin-key-input').value.trim();
+    if (!key) return;
+    try {
+      const r = await fetch(`${API}/admin/api/stats`, {
+        headers: { 'X-Admin-Key': key }
+      });
+      if (r.status === 401) {
+        document.getElementById('login-error').style.display = 'block';
+        return;
+      }
+      ADMIN_KEY = key;
+      sessionStorage.setItem('admin_key', key);
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      initApp();
+    } catch(e) {
+      document.getElementById('login-error').style.display = 'block';
+      document.getElementById('login-error').textContent = '❌ Error de conexión con el servidor.';
+    }
+  }
+  document.getElementById('admin-key-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+
+  // Auto-login si ya hay clave guardada
+  const saved = sessionStorage.getItem('admin_key');
+  if (saved) {
+    ADMIN_KEY = saved;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    setTimeout(initApp, 0);
+  }
+
+  // ── API HELPER ────────────────────────────────────────────────
+  async function api(path, opts = {}) {
+    const headers = { 'X-Admin-Key': ADMIN_KEY, 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const r = await fetch(`${API}${path}`, { ...opts, headers });
+    if (r.status === 401) { sessionStorage.clear(); location.reload(); }
+    return r;
+  }
+
+  // ── NAVIGATION ────────────────────────────────────────────────
+  const pages = ['dashboard', 'conversations', 'chat-detail', 'products'];
+  function showPage(name) {
+    pages.forEach(p => {
+      document.getElementById(`page-${p}`).classList.toggle('active', p === name);
+      const nav = document.getElementById(`nav-${p}`);
+      if (nav) nav.classList.toggle('active', p === name);
+    });
+    if (name === 'dashboard')     loadDashboard();
+    if (name === 'conversations') loadConversations();
+    if (name === 'products')      loadProducts();
+  }
+
+  function initApp() {
+    loadDashboard();
+  }
+
+  // ── TOAST ─────────────────────────────────────────────────────
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `show ${type}`;
+    setTimeout(() => t.className = '', 3000);
+  }
+
+  // ── DASHBOARD ─────────────────────────────────────────────────
+  const CARD_DEFS = [
+    { key: 'total_conversations',    label: 'Conversaciones totales', cls: 'purple', sub: 'usuarios únicos' },
+    { key: 'active_conversations_24h', label: 'Activos últimas 24h',  cls: 'green',  sub: 'con actividad reciente' },
+    { key: 'messages_today',         label: 'Mensajes hoy',           cls: 'yellow', sub: 'enviados y recibidos' },
+    { key: 'total_messages',         label: 'Mensajes totales',       cls: 'purple', sub: 'en toda la historia' },
+    { key: 'total_ai_calls',         label: 'Respuestas del bot',     cls: 'green',  sub: 'generadas por el asistente' },
+    { key: 'active_products',        label: 'Productos activos',      cls: 'yellow', sub: 'visibles en el bot' },
+    { key: 'human_sessions',         label: 'Atención humana',        cls: 'red',    sub: 'chats en modo agente' },
+  ];
+
+  async function loadDashboard() {
+    const r = await api('/admin/api/stats');
+    const data = await r.json();
+    const grid = document.getElementById('stats-grid');
+    grid.innerHTML = CARD_DEFS.map(d => `
+      <div class="card ${d.cls}">
+        <div class="card-label">${d.label}</div>
+        <div class="card-value">${data[d.key] ?? 0}</div>
+        <div class="card-sub">${d.sub}</div>
+      </div>
+    `).join('');
+  }
+
+  // ── CONVERSATIONS ─────────────────────────────────────────────
+  const STATE_BADGES = {
+    idle:        ['gray',   'En espera'],
+    main_menu:   ['purple', 'Menú principal'],
+    catalog:     ['green',  'Catálogo'],
+    support:     ['yellow', 'Soporte'],
+    faq:         ['green',  'FAQ'],
+    human_agent: ['red',    '🔴 Agente humano'],
+  };
+
+  async function loadConversations() {
+    document.getElementById('conv-tbody').innerHTML =
+      '<tr class="loading-row"><td colspan="6"><div class="spinner"></div></td></tr>';
+    const r = await api('/admin/api/conversations');
+    const data = await r.json();
+    const tbody = document.getElementById('conv-tbody');
+    if (!data.length) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="6">Sin conversaciones aún.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(c => {
+      const [badgeCls, badgeTxt] = STATE_BADGES[c.current_state] || ['gray', c.current_state];
+      const lastMsg = c.last_message
+        ? `<em>${c.last_message.role === 'user' ? '👤' : '🤖'}</em> ${escHtml(c.last_message.body)}`
+        : '—';
+      const upd = c.updated_at ? new Date(c.updated_at).toLocaleString('es') : '—';
+      return `<tr>
+        <td><code style="font-size:12px;color:var(--text-muted)">${c.chat_id}</code></td>
+        <td><span class="badge ${badgeCls}">${badgeTxt}</span></td>
+        <td>${c.message_count}</td>
+        <td style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${lastMsg}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${upd}</td>
+        <td><button class="icon-btn" title="Ver historial" onclick="openChat('${c.chat_id}')">🔍</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function openChat(chatId) {
+    document.getElementById('chat-detail-title').textContent = `Chat: ${chatId}`;
+    document.getElementById('chat-detail-sub').textContent = 'Cargando historial...';
+    showPage('chat-detail');
+    const r = await api(`/admin/api/conversations/${encodeURIComponent(chatId)}`);
+    const msgs = await r.json();
+    document.getElementById('chat-detail-sub').textContent = `${msgs.length} mensajes`;
+    const wrap = document.getElementById('messages-wrap');
+    wrap.innerHTML = msgs.map(m => `
+      <div class="msg ${m.role}">
+        <div>${escHtml(m.body)}</div>
+        <div class="msg-time">${new Date(m.timestamp).toLocaleString('es')} · ${m.role === 'user' ? '👤 Cliente' : '🤖 Bot'}</div>
+      </div>
+    `).join('');
+    wrap.scrollTop = wrap.scrollHeight;
+  }
+
+  // ── PRODUCTS ──────────────────────────────────────────────────
+  const CAT_LABELS = { tech: '💻 Tecnología', phones: '📱 Celulares', audio: '🎧 Audio' };
+
+  async function loadProducts() {
+    document.getElementById('products-tbody').innerHTML =
+      '<tr class="loading-row"><td colspan="8"><div class="spinner"></div></td></tr>';
+    const r = await api('/admin/api/products');
+    const data = await r.json();
+    const tbody = document.getElementById('products-tbody');
+    if (!data.length) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">Sin productos. ¡Crea el primero!</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(p => `<tr>
+      <td style="color:var(--text-muted);font-size:12px">#${p.id}</td>
+      <td><strong>${escHtml(p.name)}</strong></td>
+      <td style="max-width:200px;color:var(--text-muted);font-size:13px">${escHtml(p.description)}</td>
+      <td><strong style="color:var(--green-lt)">$${p.price.toFixed(2)}</strong></td>
+      <td>
+        <span class="badge ${p.stock > 0 ? 'green' : 'red'}">
+          ${p.stock > 0 ? `✅ ${p.stock}` : '❌ 0'}
+        </span>
+      </td>
+      <td><span class="badge purple">${CAT_LABELS[p.category] || p.category}</span></td>
+      <td><span class="badge ${p.active ? 'green' : 'gray'}">${p.active ? 'Activo' : 'Inactivo'}</span></td>
+      <td>
+        <button class="icon-btn" title="Editar" onclick='openProductModal(${JSON.stringify(p)})'>✏️</button>
+        <button class="icon-btn btn-danger" title="Desactivar" onclick="deactivateProduct(${p.id}, '${escHtml(p.name)}')">🗑️</button>
+      </td>
+    </tr>`).join('');
+  }
+
+  function openProductModal(product = null) {
+    document.getElementById('modal-title').textContent = product ? 'Editar Producto' : 'Nuevo Producto';
+    document.getElementById('edit-product-id').value = product?.id || '';
+    document.getElementById('f-name').value     = product?.name || '';
+    document.getElementById('f-desc').value     = product?.description || '';
+    document.getElementById('f-price').value    = product?.price || '';
+    document.getElementById('f-stock').value    = product?.stock ?? '';
+    document.getElementById('f-category').value = product?.category || 'tech';
+    document.getElementById('f-active').value   = product ? String(product.active) : 'true';
+    document.getElementById('product-modal').classList.add('open');
+  }
+
+  function closeProductModal() {
+    document.getElementById('product-modal').classList.remove('open');
+  }
+
+  async function saveProduct() {
+    const id = document.getElementById('edit-product-id').value;
+    const body = {
+      name:        document.getElementById('f-name').value.trim(),
+      description: document.getElementById('f-desc').value.trim(),
+      price:       parseFloat(document.getElementById('f-price').value),
+      stock:       parseInt(document.getElementById('f-stock').value),
+      category:    document.getElementById('f-category').value,
+      active:      document.getElementById('f-active').value === 'true',
+    };
+    if (!body.name || !body.description || isNaN(body.price)) {
+      showToast('⚠️ Completa todos los campos requeridos.', 'error'); return;
+    }
+    const r = id
+      ? await api(`/admin/api/products/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+      : await api('/admin/api/products', { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok) {
+      showToast(id ? '✅ Producto actualizado.' : '✅ Producto creado.');
+      closeProductModal();
+      loadProducts();
+    } else {
+      const err = await r.json();
+      showToast(`❌ ${err.detail || 'Error al guardar.'}`, 'error');
+    }
+  }
+
+  async function deactivateProduct(id, name) {
+    if (!confirm(`¿Desactivar "${name}" del catálogo?`)) return;
+    const r = await api(`/admin/api/products/${id}`, { method: 'DELETE' });
+    if (r.ok) { showToast('🗑️ Producto desactivado.'); loadProducts(); }
+    else showToast('❌ Error al desactivar.', 'error');
+  }
+
+  // ── UTILS ─────────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Cerrar modal al hacer click fuera
+  document.getElementById('product-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeProductModal();
+  });
+</script>
+</body>
+</html>

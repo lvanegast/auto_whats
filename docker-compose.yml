@@ -36,6 +36,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - ADMIN_PHONE_NUMBER=${ADMIN_PHONE_NUMBER}
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
       # LangSmith — Observabilidad y trazabilidad de llamadas a Gemini
       - LANGSMITH_TRACING=${LANGSMITH_TRACING}
       - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT}

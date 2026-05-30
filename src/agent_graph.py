@@ -1,20 +1,26 @@
 """
-agent_graph.py - Grafo Conversacional del Chatbot de WhatsApp con LangGraph
-Convierte la máquina de estados if/else de main.py en un grafo visual y modular.
+agent_graph.py - Cerebro Central del Bot de WhatsApp usando LangGraph
+Contiene los Nodos (pantallas) y Bordes (rutas) de la máquina de estados.
 """
 import os
+import logging
 from typing import Annotated, Optional
 from typing_extensions import TypedDict
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages import SystemMessage, BaseMessage
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
+from langsmith import traceable
 from dotenv import load_dotenv
 
+from src.database import SessionLocal
+from src.models import Product
+from sqlalchemy.future import select
+
 load_dotenv()
+logger = logging.getLogger("agent-graph")
 
 # ==============================================================================
-# MODELO GEMINI - Reutilizamos la configuración de agent.py
+# MODELO GEMINI
 # ==============================================================================
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
@@ -24,184 +30,290 @@ llm = ChatGoogleGenerativeAI(
     max_retries=2
 )
 
+SYSTEM_PROMPT = """Eres el asistente virtual experto de nuestra tienda.
+Tu objetivo es responder de forma amable, clara y concisa a las preguntas de los clientes.
+Si el usuario te hace una pregunta que se sale totalmente del contexto de la tienda o soporte,
+responde amablemente que eres un asistente de la tienda y no puedes ayudar con eso.
+Usa emojis moderadamente. Nunca seas descortés."""
+
 # ==============================================================================
-# MENÚS DEL CHATBOT (Reutilizados de main.py para consistencia)
+# CONSTANTES DE TEXTO (MENÚS)
 # ==============================================================================
-MENU_PRINCIPAL = """🤖 *¡Hola!* Bienvenido al asistente virtual de exploración tecnológica.
+MENU_PRINCIPAL = """🤖 *¡Hola{name}!* Bienvenido a nuestro asistente virtual.
 
-Por favor, selecciona una opción respondiendo con su *número*:
+Por favor, selecciona una de las siguientes opciones respondiendo con su *número* o *palabra clave*:
 
-*1️⃣ LangGraph* 🔵 - Explorar el grafo de conversación.
-*2️⃣ LangSmith* 💛 - Ver el rastreo y telemetría del bot.
-*3️⃣ LangServe* 🟣 - Aprender cómo se expone este agente como API.
-*4️⃣ Hablar con Gemini* 🤖 - Consulta libre con Inteligencia Artificial.
+*1️⃣ Ver Catálogo* 📦 - Explora nuestros productos y ofertas.
+*2️⃣ Contactar Soporte* 🛠️ - Habla con uno de nuestros agentes en vivo.
+*3️⃣ Preguntas Frecuentes* ❓ - Resuelve tus dudas al instante.
 
-✍️ _Escribe el número (1-4) o escribe "menú" para volver al inicio._"""
+✍️ _Escribe el número correspondiente (1, 2, 3) o escribe "menú"._"""
 
-RESPUESTA_LANGGRAPH = """🔵 *LANGGRAPH: Motor de Flujos Conversacionales*
+MENU_CATALOGO = """📦 *NUESTRO CATÁLOGO DE PRODUCTOS* 📦
 
-LangGraph estructura el bot como un *grafo dirigido de nodos*. Cada pantalla del menú es un nodo, y las respuestas del usuario son los bordes que conectan nodos.
-
-*Ventajas principales:*
-• Flujos complejos y cíclicos sin código if/else desordenado.
-• Persistencia de estado entre turnos de conversación.
-• Visualización automática del flujo como diagrama.
+Explora nuestras categorías principales respondiendo con su número:
+*11* - 💻 *Tecnología y Computación*
+*12* - 📱 *Celulares y Accesorios*
+*13* - 🎧 *Audio y Sonido*
 
 *0️⃣ Volver al Menú Principal* 🔙"""
 
-RESPUESTA_LANGSMITH = """💛 *LANGSMITH: Observabilidad y Depuración de IA*
+MENU_SOPORTE = """🛠️ *SOPORTE TÉCNICO Y CONTACTO* 🛠️
 
-LangSmith registra en tiempo real cada llamada a Gemini, mostrando:
-• El prompt exacto inyectado al modelo.
-• Los tokens consumidos y el costo estimado.
-• La latencia en milisegundos de cada nodo.
-• El historial de cambios de respuesta entre versiones.
-
-Puedes verlo en: https://smith.langchain.com
+Estamos listos para ayudarte. Por favor selecciona una opción:
+*21* - 💬 *Hablar con un Agente (Humano)*
+*22* - 📧 *Dejar un correo de Soporte*
 
 *0️⃣ Volver al Menú Principal* 🔙"""
 
-RESPUESTA_LANGSERVE = """🟣 *LANGSERVE: Tu Agente como API REST*
+MENU_FAQ = """❓ *PREGUNTAS FRECUENTES (FAQ)* ❓
 
-LangServe expone este grafo de LangGraph como un endpoint HTTP estándar con:
-• POST `/agent/invoke` - Invocar el bot y obtener la respuesta completa.
-• POST `/agent/stream` - Recibir la respuesta en tiempo real (streaming).
-• GET `/agent/playground/` - Interfaz web visual para chatear con el bot.
+Selecciona la duda que deseas resolver:
+*31* - 🚚 *¿Cuáles son los tiempos de envío?*
+*32* - 💳 *¿Qué métodos de pago aceptan?*
+*33* - 🔄 *¿Cómo funcionan las devoluciones?*
 
 *0️⃣ Volver al Menú Principal* 🔙"""
 
-SYSTEM_PROMPT_GEMINI = """Eres un asistente experto en el ecosistema de LangChain y en desarrollo de bots conversacionales con FastAPI y WhatsApp. Tu objetivo es responder preguntas técnicas de forma concisa, directa y educativa. Usa emojis de forma moderada. Evita respuestas muy largas, ve siempre al punto."""
+RESPUESTA_AGENTE = """💬 *CONECTANDO CON UN AGENTE*
+Tu solicitud ha sido transferida a nuestro equipo técnico. Un agente humano se pondrá en contacto contigo en este chat en los próximos 5 minutos.
+¡Gracias por tu paciencia! 🕒
+
+*0️⃣ Volver al Menú Principal* 🔙"""
+
+RESPUESTA_CORREO = """📧 *CORREO DE SOPORTE*
+Puedes escribirnos en cualquier momento a: *soporte@tuempresa.com*
+Respondemos en un plazo máximo de 12 horas hábiles.
+
+*0️⃣ Volver al Menú Principal* 🔙"""
+
+RESPUESTA_ENVIO = """🚚 *TIEMPOS DE ENVÍO*
+* Locales: Mismo día o 24 hrs.
+* Nacionales: 2 a 4 días hábiles.
+* Internacionales: 7 a 15 días hábiles.
+
+*0️⃣ Volver al Menú Principal* 🔙
+*3️⃣ Volver a Preguntas Frecuentes* ❓"""
+
+RESPUESTA_PAGO = """💳 *MÉTODOS DE PAGO*
+Aceptamos:
+* Tarjetas de Crédito y Débito (Visa, Mastercard, AMEX).
+* Transferencias bancarias.
+* PayPal.
+* Efectivo en puntos de pago locales.
+
+*0️⃣ Volver al Menú Principal* 🔙
+*3️⃣ Volver a Preguntas Frecuentes* ❓"""
+
+RESPUESTA_DEVOLUCION = """🔄 *DEVOLUCIONES Y GARANTÍAS*
+Tienes 30 días naturales para devolver tu producto sin costo adicional si presenta defectos de fábrica.
+
+*0️⃣ Volver al Menú Principal* 🔙
+*3️⃣ Volver a Preguntas Frecuentes* ❓"""
+
+
+# ==============================================================================
+# FUNCIONES AUXILIARES (BD)
+# ==============================================================================
+async def get_catalogo_categoria(category: str) -> str:
+    """Consulta los productos dinámicamente desde la BD."""
+    _CATALOGO_EMOJIS = {"tech": "💻", "phones": "📱", "audio": "🎧"}
+    _CATALOGO_TITULOS = {"tech": "TECNOLOGÍA Y COMPUTACIÓN", "phones": "CELULARES Y ACCESORIOS", "audio": "AUDIO Y SONIDO"}
+    
+    async with SessionLocal() as db:
+        try:
+            q = await db.execute(select(Product).where(Product.category == category, Product.active == True).order_by(Product.id))
+            products = q.scalars().all()
+
+            emoji  = _CATALOGO_EMOJIS.get(category, "📦")
+            titulo = _CATALOGO_TITULOS.get(category, category.upper())
+
+            if not products:
+                return f"{emoji} *{titulo}*\n\n_No hay productos disponibles por el momento._\n\n*0️⃣ Volver al Menú Principal* 🔙\n*1️⃣ Volver al Catálogo* 📦"
+
+            lines = [f"{emoji} *{titulo}*\n"]
+            for i, p in enumerate(products, 1):
+                stock_icon = "✅" if p.stock > 0 else "❌"
+                stock_txt  = f"En stock ({p.stock})" if p.stock > 0 else "Sin stock"
+                lines.append(f"*{i}.* {p.name}\n     💰 *${float(p.price):.2f}* | {stock_icon} {stock_txt}\n     _{p.description}_")
+
+            lines.append("\n*0️⃣ Volver al Menú Principal* 🔙")
+            lines.append("*1️⃣ Volver al Catálogo* 📦")
+            return "\n\n".join(lines[:1] + lines[1:])
+        except Exception as e:
+            logger.error(f"Error cargando catálogo: {e}")
+            return "Error al cargar catálogo."
+
 
 # ==============================================================================
 # ESTADO DEL GRAFO
 # ==============================================================================
 class BotState(TypedDict):
-    """Estado que viaja a través de todos los nodos del grafo."""
-    # add_messages es un reducer que acumula mensajes en la lista en vez de reemplazarlos
-    messages: Annotated[list[BaseMessage], add_messages]
-    # Estado actual del menú del usuario
-    current_menu: str
-    # Última entrada del usuario (texto plano normalizado)
+    chat_id: str
+    sender_name: str
     user_input: str
+    current_state: str
+    chat_history: list[BaseMessage]
+    response_text: Optional[str]
+    new_state: Optional[str]
+    admin_alert: Optional[str]
 
 
 # ==============================================================================
-# NODOS DEL GRAFO
+# NODOS
 # ==============================================================================
+def human_agent_node(state: BotState) -> dict:
+    text_input = state["user_input"].lower()
+    if text_input in ["!menu", "!ayuda", "menu", "ayuda"]:
+        # Se libera el silencio
+        msg = MENU_PRINCIPAL.format(name=f", {state['sender_name']}")
+        return {"response_text": msg, "new_state": "main_menu"}
+    
+    # Si sigue en human_agent y no hay comando de escape, no responde nada.
+    return {"response_text": None, "new_state": "human_agent"}
+
+
 def main_menu_node(state: BotState) -> dict:
-    """Nodo del Menú Principal: genera el texto de bienvenida."""
-    return {
-        "messages": [AIMessage(content=MENU_PRINCIPAL)],
-        "current_menu": "main_menu"
-    }
+    msg = MENU_PRINCIPAL.format(name=f", {state['sender_name']}")
+    return {"response_text": msg, "new_state": "main_menu"}
 
 
-def langgraph_node(state: BotState) -> dict:
-    """Nodo de información sobre LangGraph."""
-    return {
-        "messages": [AIMessage(content=RESPUESTA_LANGGRAPH)],
-        "current_menu": "langgraph_info"
-    }
+async def catalog_node(state: BotState) -> dict:
+    text_input = state["user_input"].lower()
+    
+    if text_input == "11" or "tecnología" in text_input:
+        msg = await get_catalogo_categoria("tech")
+        return {"response_text": msg, "new_state": "catalog"}
+    elif text_input == "12" or "celulares" in text_input:
+        msg = await get_catalogo_categoria("phones")
+        return {"response_text": msg, "new_state": "catalog"}
+    elif text_input == "13" or "audio" in text_input:
+        msg = await get_catalogo_categoria("audio")
+        return {"response_text": msg, "new_state": "catalog"}
+    
+    # Default: mostrar menú de catálogo
+    return {"response_text": MENU_CATALOGO, "new_state": "catalog"}
 
 
-def langsmith_node(state: BotState) -> dict:
-    """Nodo de información sobre LangSmith."""
-    return {
-        "messages": [AIMessage(content=RESPUESTA_LANGSMITH)],
-        "current_menu": "langsmith_info"
-    }
+def support_node(state: BotState) -> dict:
+    text_input = state["user_input"].lower()
+    
+    if text_input == "21" or "agente" in text_input:
+        alerta = (
+            f"🤖 *[Alerta de Soporte en Vivo]*\n\n"
+            f"El cliente *{state['sender_name']}* ({state['chat_id']}) ha solicitado asistencia humana.\n\n"
+            f"👉 _Abre WhatsApp Web o tu celular. El bot ha sido suspendido y silenciado._\n\n"
+            f"💡 _Para reactivar el bot automático, escribe *!menu* en cualquier momento._"
+        )
+        return {"response_text": RESPUESTA_AGENTE, "new_state": "human_agent", "admin_alert": alerta}
+        
+    elif text_input == "22" or "correo" in text_input:
+        return {"response_text": RESPUESTA_CORREO, "new_state": "support"}
+        
+    return {"response_text": MENU_SOPORTE, "new_state": "support"}
 
 
-def langserve_node(state: BotState) -> dict:
-    """Nodo de información sobre LangServe."""
-    return {
-        "messages": [AIMessage(content=RESPUESTA_LANGSERVE)],
-        "current_menu": "langserve_info"
-    }
+def faq_node(state: BotState) -> dict:
+    text_input = state["user_input"].lower()
+    
+    if text_input == "31" or "envío" in text_input:
+        return {"response_text": RESPUESTA_ENVIO, "new_state": "faq"}
+    elif text_input == "32" or "pago" in text_input:
+        return {"response_text": RESPUESTA_PAGO, "new_state": "faq"}
+    elif text_input == "33" or "devolución" in text_input or "devolucion" in text_input:
+        return {"response_text": RESPUESTA_DEVOLUCION, "new_state": "faq"}
+        
+    return {"response_text": MENU_FAQ, "new_state": "faq"}
 
 
-async def gemini_node(state: BotState) -> dict:
-    """
-    Nodo de IA: invoca Gemini con el historial completo de la conversación.
-    LangSmith rastreará automáticamente esta llamada al LLM.
-    """
-    system = SystemMessage(content=SYSTEM_PROMPT_GEMINI)
-    history = state["messages"][-6:]  # Últimos 6 mensajes de contexto
-    response = await llm.ainvoke([system] + history)
-    return {
-        "messages": [response],
-        "current_menu": "gemini_chat"
-    }
+@traceable(name="WhatsApp → Gemini", run_type="llm")
+async def ai_fallback_node(state: BotState) -> dict:
+    """Llama a Gemini cuando el texto no coincide con ningún menú numérico."""
+    system = SystemMessage(content=SYSTEM_PROMPT)
+    history = state["chat_history"][-8:]  # Traer contexto reciente
+    user_msg = state["user_input"]
+    
+    # Aquí podríamos convertir los diccionarios en objetos BaseMessage, pero 
+    # la librería de LangChain acepta directamente la lista de mensajes si están bien formateados.
+    # En nuestro caso, history ya debe ser una lista de BaseMessage (HumanMessage, AIMessage).
+    messages = [system] + history
+    
+    response = await llm.ainvoke(messages)
+    return {"response_text": response.content, "new_state": state["current_state"]}
 
 
 # ==============================================================================
-# ENRUTADOR CONDICIONAL
-# Decide a qué nodo ir basándose en el estado y la entrada del usuario.
+# ENRUTADOR
 # ==============================================================================
-def router(state: BotState) -> str:
-    """
-    Función de enrutamiento: decide el siguiente nodo del grafo
-    según el estado actual del menú y la entrada del usuario.
-    """
-    user_input = state.get("user_input", "").strip().lower()
-    current_menu = state.get("current_menu", "idle")
+def route_decision(state: BotState) -> str:
+    current = state.get("current_state", "idle")
+    text = state.get("user_input", "").lower().strip()
 
-    # Comandos globales de regreso al menú principal
-    if user_input in ["0", "menu", "menú", "inicio", "hola", "hi", "start"]:
-        return "main_menu"
+    # 1. Prioridad: Intervención humana
+    if current == "human_agent":
+        return "human_agent_node"
 
-    # Desde el menú principal, dirigir a submenús
-    if current_menu in ["main_menu", "idle", "gemini_chat",
-                        "langgraph_info", "langsmith_info", "langserve_info"]:
-        if user_input == "1":
-            return "langgraph_info"
-        elif user_input == "2":
-            return "langsmith_info"
-        elif user_input == "3":
-            return "langserve_info"
-        elif user_input == "4":
-            return "gemini_chat"
+    # 2. Comandos globales (Escape)
+    if text in ["0", "menu", "menú", "inicio", "hola", "hi", "start"]:
+        return "main_menu_node"
+        
+    if text in ["!ping", "ping"]:
+        # Se podría hacer un nodo de comandos, pero podemos enviarlo al main_menu que no hará ping.
+        # Por simplicidad, que Gemini lo responda o le creamos un nodo rápido.
+        return "ai_fallback_node"
 
-    # Fallback por defecto: si no reconoce la entrada, va a Gemini
-    return "gemini_chat"
+    # 3. Flujo guiado por el estado actual
+    if current in ["main_menu", "idle"]:
+        if text == "1" or "catálogo" in text or "catalogo" in text:
+            return "catalog_node"
+        if text == "2" or "soporte" in text:
+            return "support_node"
+        if text == "3" or "preguntas" in text or "faq" in text:
+            return "faq_node"
+            
+    elif current == "catalog":
+        if text in ["1", "11", "12", "13"]: return "catalog_node"
+        
+    elif current == "support":
+        if text in ["2", "21", "22"]: return "support_node"
+        
+    elif current == "faq":
+        if text in ["3", "31", "32", "33"]: return "faq_node"
+
+    # 4. Fallback: Lenguaje Natural (Gemini)
+    return "ai_fallback_node"
 
 
 # ==============================================================================
 # CONSTRUCCIÓN DEL GRAFO
 # ==============================================================================
-def build_graph() -> StateGraph:
-    """Construye y compila el grafo conversacional del bot."""
-    workflow = StateGraph(BotState)
+workflow = StateGraph(BotState)
 
-    # 1. Registrar todos los nodos
-    workflow.add_node("main_menu", main_menu_node)
-    workflow.add_node("langgraph_info", langgraph_node)
-    workflow.add_node("langsmith_info", langsmith_node)
-    workflow.add_node("langserve_info", langserve_node)
-    workflow.add_node("gemini_chat", gemini_node)
+workflow.add_node("human_agent_node", human_agent_node)
+workflow.add_node("main_menu_node", main_menu_node)
+workflow.add_node("catalog_node", catalog_node)
+workflow.add_node("support_node", support_node)
+workflow.add_node("faq_node", faq_node)
+workflow.add_node("ai_fallback_node", ai_fallback_node)
 
-    # 2. Nodo de enrutamiento: punto de entrada desde el inicio
-    workflow.add_conditional_edges(
-        START,
-        router,
-        {
-            "main_menu": "main_menu",
-            "langgraph_info": "langgraph_info",
-            "langsmith_info": "langsmith_info",
-            "langserve_info": "langserve_info",
-            "gemini_chat": "gemini_chat",
-        }
-    )
+workflow.add_conditional_edges(
+    START,
+    route_decision,
+    {
+        "human_agent_node": "human_agent_node",
+        "main_menu_node": "main_menu_node",
+        "catalog_node": "catalog_node",
+        "support_node": "support_node",
+        "faq_node": "faq_node",
+        "ai_fallback_node": "ai_fallback_node",
+    }
+)
 
-    # 3. Todos los nodos terminales apuntan a END
-    workflow.add_edge("main_menu", END)
-    workflow.add_edge("langgraph_info", END)
-    workflow.add_edge("langsmith_info", END)
-    workflow.add_edge("langserve_info", END)
-    workflow.add_edge("gemini_chat", END)
+workflow.add_edge("human_agent_node", END)
+workflow.add_edge("main_menu_node", END)
+workflow.add_edge("catalog_node", END)
+workflow.add_edge("support_node", END)
+workflow.add_edge("faq_node", END)
+workflow.add_edge("ai_fallback_node", END)
 
-    return workflow.compile()
-
-
-# Instancia global del grafo compilado (reutilizable por LangServe y webhooks)
-bot_graph = build_graph()
+bot_graph = workflow.compile()
