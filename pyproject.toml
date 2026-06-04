@@ -30,7 +30,10 @@ dependencies = [
 
 [project.scripts]
 auto-whats = "src.main:start"
-test-send = "src.test_send:main"
+test-send = "tests.test_send:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.ruff.lint]
+ignore = ["E402"]

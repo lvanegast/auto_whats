@@ -2,9 +2,10 @@
 bot_engine.py - Cerebro Central del Bot de WhatsApp usando LangGraph
 Contiene los Nodos (pantallas) y Bordes (rutas) de la máquina de estados.
 """
+
 import os
 import logging
-from typing import Annotated, Optional
+from typing import Optional
 from typing_extensions import TypedDict
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, BaseMessage
@@ -27,7 +28,7 @@ llm = ChatGoogleGenerativeAI(
     google_api_key=os.getenv("GOOGLE_API_KEY"),
     temperature=0.7,
     timeout=20.0,
-    max_retries=2
+    max_retries=2,
 )
 
 SYSTEM_PROMPT = """Eres el asistente virtual experto de nuestra tienda.
@@ -118,14 +119,22 @@ Tienes 30 días naturales para devolver tu producto sin costo adicional si prese
 async def get_catalogo_categoria(category: str) -> str:
     """Consulta los productos dinámicamente desde la BD."""
     _CATALOGO_EMOJIS = {"tech": "💻", "phones": "📱", "audio": "🎧"}
-    _CATALOGO_TITULOS = {"tech": "TECNOLOGÍA Y COMPUTACIÓN", "phones": "CELULARES Y ACCESORIOS", "audio": "AUDIO Y SONIDO"}
-    
+    _CATALOGO_TITULOS = {
+        "tech": "TECNOLOGÍA Y COMPUTACIÓN",
+        "phones": "CELULARES Y ACCESORIOS",
+        "audio": "AUDIO Y SONIDO",
+    }
+
     async with SessionLocal() as db:
         try:
-            q = await db.execute(select(Product).where(Product.category == category, Product.active == True).order_by(Product.id))
+            q = await db.execute(
+                select(Product)
+                .where(Product.category == category, Product.active)
+                .order_by(Product.id)
+            )
             products = q.scalars().all()
 
-            emoji  = _CATALOGO_EMOJIS.get(category, "📦")
+            emoji = _CATALOGO_EMOJIS.get(category, "📦")
             titulo = _CATALOGO_TITULOS.get(category, category.upper())
 
             if not products:
@@ -134,8 +143,10 @@ async def get_catalogo_categoria(category: str) -> str:
             lines = [f"{emoji} *{titulo}*\n"]
             for i, p in enumerate(products, 1):
                 stock_icon = "✅" if p.stock > 0 else "❌"
-                stock_txt  = f"En stock ({p.stock})" if p.stock > 0 else "Sin stock"
-                lines.append(f"*{i}.* {p.name}\n     💰 *${float(p.price):.2f}* | {stock_icon} {stock_txt}\n     _{p.description}_")
+                stock_txt = f"En stock ({p.stock})" if p.stock > 0 else "Sin stock"
+                lines.append(
+                    f"*{i}.* {p.name}\n     💰 *${float(p.price):.2f}* | {stock_icon} {stock_txt}\n     _{p.description}_"
+                )
 
             lines.append("\n*0️⃣ Volver al Menú Principal* 🔙")
             lines.append("*1️⃣ Volver al Catálogo* 📦")
@@ -168,7 +179,7 @@ def human_agent_node(state: BotState) -> dict:
         # Se libera el silencio
         msg = MENU_PRINCIPAL.format(name=f", {state['sender_name']}")
         return {"response_text": msg, "new_state": "main_menu"}
-    
+
     # Si sigue en human_agent y no hay comando de escape, no responde nada.
     return {"response_text": None, "new_state": "human_agent"}
 
@@ -180,7 +191,7 @@ def main_menu_node(state: BotState) -> dict:
 
 async def catalog_node(state: BotState) -> dict:
     text_input = state["user_input"].lower()
-    
+
     if text_input == "11" or "tecnología" in text_input:
         msg = await get_catalogo_categoria("tech")
         return {"response_text": msg, "new_state": "catalog"}
@@ -190,14 +201,14 @@ async def catalog_node(state: BotState) -> dict:
     elif text_input == "13" or "audio" in text_input:
         msg = await get_catalogo_categoria("audio")
         return {"response_text": msg, "new_state": "catalog"}
-    
+
     # Default: mostrar menú de catálogo
     return {"response_text": MENU_CATALOGO, "new_state": "catalog"}
 
 
 def support_node(state: BotState) -> dict:
     text_input = state["user_input"].lower()
-    
+
     if text_input == "21" or "agente" in text_input:
         alerta = (
             f"🤖 *[Alerta de Soporte en Vivo]*\n\n"
@@ -205,24 +216,28 @@ def support_node(state: BotState) -> dict:
             f"👉 _Abre WhatsApp Web o tu celular. El bot ha sido suspendido y silenciado._\n\n"
             f"💡 _Para reactivar el bot automático, escribe *!menu* en cualquier momento._"
         )
-        return {"response_text": RESPUESTA_AGENTE, "new_state": "human_agent", "admin_alert": alerta}
-        
+        return {
+            "response_text": RESPUESTA_AGENTE,
+            "new_state": "human_agent",
+            "admin_alert": alerta,
+        }
+
     elif text_input == "22" or "correo" in text_input:
         return {"response_text": RESPUESTA_CORREO, "new_state": "support"}
-        
+
     return {"response_text": MENU_SOPORTE, "new_state": "support"}
 
 
 def faq_node(state: BotState) -> dict:
     text_input = state["user_input"].lower()
-    
+
     if text_input == "31" or "envío" in text_input:
         return {"response_text": RESPUESTA_ENVIO, "new_state": "faq"}
     elif text_input == "32" or "pago" in text_input:
         return {"response_text": RESPUESTA_PAGO, "new_state": "faq"}
     elif text_input == "33" or "devolución" in text_input or "devolucion" in text_input:
         return {"response_text": RESPUESTA_DEVOLUCION, "new_state": "faq"}
-        
+
     return {"response_text": MENU_FAQ, "new_state": "faq"}
 
 
@@ -231,13 +246,12 @@ async def ai_fallback_node(state: BotState) -> dict:
     """Llama a Gemini cuando el texto no coincide con ningún menú numérico."""
     system = SystemMessage(content=SYSTEM_PROMPT)
     history = state["chat_history"][-8:]  # Traer contexto reciente
-    user_msg = state["user_input"]
-    
-    # Aquí podríamos convertir los diccionarios en objetos BaseMessage, pero 
+
+    # Aquí podríamos convertir los diccionarios en objetos BaseMessage, pero
     # la librería de LangChain acepta directamente la lista de mensajes si están bien formateados.
     # En nuestro caso, history ya debe ser una lista de BaseMessage (HumanMessage, AIMessage).
     messages = [system] + history
-    
+
     response = await llm.ainvoke(messages)
     return {"response_text": response.content, "new_state": state["current_state"]}
 
@@ -256,7 +270,7 @@ def route_decision(state: BotState) -> str:
     # 2. Comandos globales (Escape)
     if text in ["0", "menu", "menú", "inicio", "hola", "hi", "start"]:
         return "main_menu_node"
-        
+
     if text in ["!ping", "ping"]:
         # Se podría hacer un nodo de comandos, pero podemos enviarlo al main_menu que no hará ping.
         # Por simplicidad, que Gemini lo responda o le creamos un nodo rápido.
@@ -270,15 +284,18 @@ def route_decision(state: BotState) -> str:
             return "support_node"
         if text == "3" or "preguntas" in text or "faq" in text:
             return "faq_node"
-            
+
     elif current == "catalog":
-        if text in ["1", "11", "12", "13"]: return "catalog_node"
-        
+        if text in ["1", "11", "12", "13"]:
+            return "catalog_node"
+
     elif current == "support":
-        if text in ["2", "21", "22"]: return "support_node"
-        
+        if text in ["2", "21", "22"]:
+            return "support_node"
+
     elif current == "faq":
-        if text in ["3", "31", "32", "33"]: return "faq_node"
+        if text in ["3", "31", "32", "33"]:
+            return "faq_node"
 
     # 4. Fallback: Lenguaje Natural (Gemini)
     return "ai_fallback_node"
@@ -306,7 +323,7 @@ workflow.add_conditional_edges(
         "support_node": "support_node",
         "faq_node": "faq_node",
         "ai_fallback_node": "ai_fallback_node",
-    }
+    },
 )
 
 workflow.add_edge("human_agent_node", END)

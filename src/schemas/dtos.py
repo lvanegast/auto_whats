@@ -1,13 +1,15 @@
 from typing import Optional
 from pydantic import BaseModel
 
+
 class ProductCreate(BaseModel):
     name: str
     description: str
     price: float
     stock: int
-    category: str   # "tech" | "phones" | "audio"
+    category: str  # "tech" | "phones" | "audio"
     active: bool = True
+
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None

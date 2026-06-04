@@ -21,8 +21,7 @@ from langchain_core.messages import HumanMessage
 
 # Configuración básica de Logging profesional
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("auto-whats-backend")
 
@@ -32,7 +31,7 @@ app = FastAPI(
     description="Servicio backend en Python para procesar eventos y lógica de negocio de WhatsApp.",
     version="2.0.0",
     docs_url=None,
-    redoc_url=None
+    redoc_url=None,
 )
 
 # Registrar Routers de la capa de presentación (API)
@@ -43,6 +42,7 @@ app.include_router(webhook_router)
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
 
 # ==============================================================================
 # SCALAR: Documentación de API interactiva y moderna de última generación
@@ -78,6 +78,7 @@ async def scalar_api_reference():
     """
     return HTMLResponse(content=html_content)
 
+
 # ==============================================================================
 # LANGSERVE: Exposición del Asistente de LangGraph como API REST con Playground
 # ==============================================================================
@@ -95,10 +96,11 @@ async def invoke_bot(user_input: str) -> str:
         "chat_history": [HumanMessage(content=user_input)],
         "response_text": None,
         "new_state": None,
-        "admin_alert": None
+        "admin_alert": None,
     }
     result = await bot_graph.ainvoke(state)
     return result.get("response_text") or "No se pudo generar respuesta."
+
 
 add_routes(
     app,
@@ -116,7 +118,9 @@ async def startup_event():
     3. Registra automáticamente el webhook en OpenWA (sin intervención manual).
     """
     # 1. Crear tablas en Postgres de forma automática si no existen
-    logger.info("Verificando y creando tablas de base de datos asíncronas en PostgreSQL...")
+    logger.info(
+        "Verificando y creando tablas de base de datos asíncronas en PostgreSQL..."
+    )
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -136,13 +140,19 @@ async def startup_event():
                     if s.get("name") == OPENWA_SESSION_ID:
                         dynamic_id = s.get("id")
                         openwa_client.session_id = dynamic_id
-                        logger.info(f"✅ ID de sesión de OpenWA resuelto con éxito: '{dynamic_id}' (nombre: '{OPENWA_SESSION_ID}')")
+                        logger.info(
+                            f"✅ ID de sesión de OpenWA resuelto con éxito: '{dynamic_id}' (nombre: '{OPENWA_SESSION_ID}')"
+                        )
                         break
                 else:
-                    logger.warning(f"⚠️ No se encontró ninguna sesión con el nombre '{OPENWA_SESSION_ID}' en OpenWA.")
+                    logger.warning(
+                        f"⚠️ No se encontró ninguna sesión con el nombre '{OPENWA_SESSION_ID}' en OpenWA."
+                    )
                     return
             else:
-                logger.error(f"⚠️ Error al listar sesiones en OpenWA (Status {res.status_code}): {res.text}")
+                logger.error(
+                    f"⚠️ Error al listar sesiones en OpenWA (Status {res.status_code}): {res.text}"
+                )
                 return
         except Exception as e:
             logger.error(f"⚠️ No se pudo conectar con OpenWA en el arranque: {e}")
@@ -158,7 +168,9 @@ async def _register_webhook_on_startup(session_id: str):
     a este backend. Se ejecuta automáticamente en cada arranque del servidor.
     La URL destino se puede sobreescribir con la variable WEBHOOK_SELF_URL.
     """
-    webhook_url = os.getenv("WEBHOOK_SELF_URL", "http://host.docker.internal:8000/webhook")
+    webhook_url = os.getenv(
+        "WEBHOOK_SELF_URL", "http://host.docker.internal:8000/webhook"
+    )
     webhook_events = ["message.received", "session.status"]
 
     logger.info(f"🔗 Configurando webhook automático -> {webhook_url}")
@@ -174,13 +186,17 @@ async def _register_webhook_on_startup(session_id: str):
                     wh_id = wh.get("id")
                     del_res = await client.delete(
                         f"{openwa_client.base_url}/api/sessions/{session_id}/webhooks/{wh_id}",
-                        headers=openwa_client.headers
+                        headers=openwa_client.headers,
                     )
-                    logger.info(f"  🗑️  Webhook anterior eliminado: {wh_id} (status {del_res.status_code})")
+                    logger.info(
+                        f"  🗑️  Webhook anterior eliminado: {wh_id} (status {del_res.status_code})"
+                    )
 
             # 3b. Registrar el nuevo webhook
             payload = {"url": webhook_url, "events": webhook_events}
-            reg_res = await client.post(list_wh_url, headers=openwa_client.headers, json=payload)
+            reg_res = await client.post(
+                list_wh_url, headers=openwa_client.headers, json=payload
+            )
 
             if reg_res.status_code == 201:
                 data = reg_res.json()
@@ -189,7 +205,9 @@ async def _register_webhook_on_startup(session_id: str):
                     f"ID={data.get('id')} | URL={data.get('url')} | Eventos={data.get('events')}"
                 )
             else:
-                logger.error(f"❌ Error al registrar webhook (Status {reg_res.status_code}): {reg_res.text}")
+                logger.error(
+                    f"❌ Error al registrar webhook (Status {reg_res.status_code}): {reg_res.text}"
+                )
 
         except Exception as e:
             logger.error(f"❌ No se pudo registrar el webhook automáticamente: {e}")
@@ -203,7 +221,7 @@ async def root():
     return {
         "status": "healthy",
         "service": "WhatsApp Automation Backend",
-        "configured_openwa_url": openwa_client.base_url
+        "configured_openwa_url": openwa_client.base_url,
     }
 
 
@@ -212,6 +230,7 @@ def start():
     Punto de entrada para ejecutar el servidor con 'uv run auto-whats'.
     """
     import uvicorn
+
     port = int(os.getenv("PORT", "8000"))
     logger.info(f"Iniciando el servidor FastAPI en el puerto {port} con auto-reload...")
     uvicorn.run("src.main:app", host="0.0.0.0", port=port, reload=True)

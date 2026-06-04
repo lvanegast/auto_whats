@@ -3,6 +3,7 @@ admin_router.py — Router del Panel de Administración de Flow Bot.
 Rutas protegidas con X-Admin-Key. Incluye CRUD de productos,
 listado de conversaciones y métricas del dashboard.
 """
+
 import os
 from typing import Optional
 from datetime import datetime, timedelta
@@ -23,10 +24,13 @@ ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "admin-secret-change-me")
 # AUTENTICACIÓN
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def verify_admin(x_admin_key: Optional[str] = Header(None)):
     """Dependencia de autenticación: valida el header X-Admin-Key."""
     if not x_admin_key or x_admin_key != ADMIN_SECRET_KEY:
-        raise HTTPException(status_code=401, detail="Clave de administrador inválida o ausente.")
+        raise HTTPException(
+            status_code=401, detail="Clave de administrador inválida o ausente."
+        )
     return True
 
 
@@ -34,16 +38,20 @@ async def verify_admin(x_admin_key: Optional[str] = Header(None)):
 # UI — Servir el panel HTML
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/", include_in_schema=False)
 async def admin_ui():
     """Sirve la interfaz de administración como SPA."""
-    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "admin", "index.html")
+    html_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "static", "admin", "index.html"
+    )
     return FileResponse(html_path)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DASHBOARD — Métricas generales
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/api/stats", dependencies=[Depends(verify_admin)])
 async def get_stats():
@@ -67,7 +75,9 @@ async def get_stats():
         total_messages = total_msg.scalar()
 
         # Mensajes hoy
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         today_msg = await db.execute(
             select(func.count(MessageHistory.id)).where(
                 MessageHistory.timestamp >= today_start
@@ -85,7 +95,7 @@ async def get_stats():
 
         # Total productos activos
         prod_q = await db.execute(
-            select(func.count(Product.id)).where(Product.active == True)
+            select(func.count(Product.id)).where(Product.active)
         )
         active_products = prod_q.scalar()
 
@@ -111,6 +121,7 @@ async def get_stats():
 # ──────────────────────────────────────────────────────────────────────────────
 # CONVERSACIONES
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/api/conversations", dependencies=[Depends(verify_admin)])
 async def list_conversations():
@@ -140,17 +151,21 @@ async def list_conversations():
             )
             msg_count = count_q.scalar()
 
-            result.append({
-                "chat_id": s.chat_id,
-                "current_state": s.current_state,
-                "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-                "message_count": msg_count,
-                "last_message": {
-                    "role": last_msg.role,
-                    "body": last_msg.body[:120],
-                    "timestamp": last_msg.timestamp.isoformat(),
-                } if last_msg else None,
-            })
+            result.append(
+                {
+                    "chat_id": s.chat_id,
+                    "current_state": s.current_state,
+                    "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+                    "message_count": msg_count,
+                    "last_message": {
+                        "role": last_msg.role,
+                        "body": last_msg.body[:120],
+                        "timestamp": last_msg.timestamp.isoformat(),
+                    }
+                    if last_msg
+                    else None,
+                }
+            )
 
     return result
 
@@ -184,6 +199,7 @@ async def get_conversation(chat_id: str):
 # PRODUCTOS — CRUD
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/products", dependencies=[Depends(verify_admin)])
 async def list_products(category: Optional[str] = None, active_only: bool = False):
     """Lista todos los productos, con filtros opcionales."""
@@ -192,7 +208,7 @@ async def list_products(category: Optional[str] = None, active_only: bool = Fals
         if category:
             query = query.where(Product.category == category)
         if active_only:
-            query = query.where(Product.active == True)
+            query = query.where(Product.active)
         query = query.order_by(Product.category, Product.id)
 
         result = await db.execute(query)
@@ -219,7 +235,9 @@ async def create_product(data: ProductCreate):
     """Crea un nuevo producto en el catálogo."""
     valid_categories = {"tech", "phones", "audio"}
     if data.category not in valid_categories:
-        raise HTTPException(status_code=400, detail=f"Categoría inválida. Usa: {valid_categories}")
+        raise HTTPException(
+            status_code=400, detail=f"Categoría inválida. Usa: {valid_categories}"
+        )
 
     async with SessionLocal() as db:
         product = Product(
@@ -253,12 +271,18 @@ async def update_product(product_id: int, data: ProductUpdate):
         if not product:
             raise HTTPException(status_code=404, detail="Producto no encontrado.")
 
-        if data.name is not None:        product.name = data.name
-        if data.description is not None: product.description = data.description
-        if data.price is not None:       product.price = data.price
-        if data.stock is not None:       product.stock = data.stock
-        if data.category is not None:    product.category = data.category
-        if data.active is not None:      product.active = data.active
+        if data.name is not None:
+            product.name = data.name
+        if data.description is not None:
+            product.description = data.description
+        if data.price is not None:
+            product.price = data.price
+        if data.stock is not None:
+            product.stock = data.stock
+        if data.category is not None:
+            product.category = data.category
+        if data.active is not None:
+            product.active = data.active
         product.updated_at = datetime.utcnow()
 
         await db.commit()
